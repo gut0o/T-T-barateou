@@ -1,0 +1,12 @@
+{
+  "name": "tt-etapa-1",
+  "version": "1.0.0",
+  "description": "T&T - Etapa 1: recebe um link do Mercado Livre e tenta buscar dados do produto.",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

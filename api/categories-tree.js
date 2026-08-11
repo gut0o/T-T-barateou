@@ -4,141 +4,235 @@ const SITE_ID = "MLB";
 const CATEGORY_DUMP_URL =
   `https://api.mercadolibre.com/sites/${SITE_ID}/categories/all`;
 
-function getRoots(data) {
-  if (Array.isArray(data)) {
-    return data;
-  }
+function normalizeCategories(data) {
+  const raw = Array.isArray(data)
+    ? data
+    : (
+        data &&
+        typeof data === "object"
+          ? Object.values(data)
+          : []
+      );
 
-  if (
-    data &&
-    typeof data === "object"
-  ) {
-    // O dump do Mercado Livre pode vir como um objeto
-    // indexado por IDs das categorias principais.
-    return Object.values(data).filter(
-      (value) =>
-        value &&
-        typeof value === "object"
-    );
-  }
+  const byId = new Map();
 
-  return [];
-}
-
-function walkCategoryTree(roots) {
-  const seenIds = new Set();
-
-  let totalCategories = 0;
-  let leafCategories = 0;
-  let maxDepth = 0;
-
-  function visit(category, depth) {
+  for (const category of raw) {
     if (
       !category ||
-      typeof category !== "object"
+      typeof category !== "object" ||
+      typeof category.id !== "string"
     ) {
-      return;
+      continue;
     }
 
-    const id =
-      typeof category.id === "string"
-        ? category.id
-        : null;
+    byId.set(
+      category.id,
+      category
+    );
+  }
 
-    // Protege contra categorias repetidas no dump.
-    if (
-      id &&
-      seenIds.has(id)
-    ) {
-      return;
-    }
+  return [...byId.values()];
+}
 
-    if (id) {
-      seenIds.add(id);
-    }
+function getChildren(category) {
+  return Array.isArray(
+    category?.children_categories
+  )
+    ? category.children_categories
+    : [];
+}
 
-    totalCategories += 1;
-    maxDepth = Math.max(
-      maxDepth,
-      depth
+function getPath(category) {
+  return Array.isArray(
+    category?.path_from_root
+  )
+    ? category.path_from_root
+    : [];
+}
+
+function findRoots(categories) {
+  const withPath =
+    categories.filter(
+      (category) =>
+        getPath(category).length > 0
     );
 
-    const children =
-      Array.isArray(
-        category.children_categories
-      )
-        ? category.children_categories
-        : [];
-
-    if (!children.length) {
-      leafCategories += 1;
-      return;
-    }
-
-    for (const child of children) {
-      visit(
-        child,
-        depth + 1
+  if (withPath.length) {
+    const roots =
+      categories.filter(
+        (category) =>
+          getPath(category).length === 1
       );
+
+    if (roots.length) {
+      return {
+        roots,
+        strategy:
+          "path_from_root"
+      };
     }
   }
 
-  for (const root of roots) {
-    visit(root, 1);
+  // Fallback caso o formato do dump mude algum dia:
+  // raiz = categoria que nunca aparece como filha.
+  const childIds =
+    new Set();
+
+  for (const category of categories) {
+    for (
+      const child
+      of getChildren(category)
+    ) {
+      if (child?.id) {
+        childIds.add(
+          child.id
+        );
+      }
+    }
   }
 
   return {
-    totalCategories,
-    leafCategories,
-    maxDepth,
-    uniqueIds:
-      seenIds.size
+    roots:
+      categories.filter(
+        (category) =>
+          !childIds.has(
+            category.id
+          )
+      ),
+    strategy:
+      "child_reference_fallback"
   };
 }
 
-function summarizeRoots(roots) {
-  return roots.map((root) => ({
-    id:
-      root?.id || null,
-    name:
-      root?.name || null,
-    directChildren:
-      Array.isArray(
-        root?.children_categories
-      )
-        ? root.children_categories.length
-        : 0
-  }));
+function calculateStats(categories) {
+  let leafCategories = 0;
+  let maxDepth = 0;
+  let categoriesWithPath = 0;
+
+  const depthDistribution =
+    {};
+
+  for (const category of categories) {
+    if (
+      getChildren(category).length === 0
+    ) {
+      leafCategories += 1;
+    }
+
+    const path =
+      getPath(category);
+
+    if (path.length) {
+      categoriesWithPath += 1;
+
+      maxDepth =
+        Math.max(
+          maxDepth,
+          path.length
+        );
+
+      depthDistribution[
+        path.length
+      ] =
+        (
+          depthDistribution[
+            path.length
+          ] || 0
+        ) + 1;
+    }
+  }
+
+  return {
+    totalCategories:
+      categories.length,
+    leafCategories,
+    maxDepth:
+      maxDepth || null,
+    categoriesWithPath,
+    depthDistribution
+  };
+}
+
+function rootSummary(roots) {
+  return roots
+    .map((root) => ({
+      id:
+        root.id,
+      name:
+        root.name || null,
+      directChildren:
+        getChildren(root).length
+    }))
+    .sort((a, b) =>
+      String(a.name || "")
+        .localeCompare(
+          String(b.name || ""),
+          "pt-BR"
+        )
+    );
+}
+
+function deepestSamples(
+  categories,
+  maxDepth
+) {
+  if (!maxDepth) {
+    return [];
+  }
+
+  return categories
+    .filter(
+      (category) =>
+        getPath(category).length ===
+        maxDepth
+    )
+    .slice(0, 5)
+    .map((category) => ({
+      id:
+        category.id,
+      name:
+        category.name || null,
+      path:
+        getPath(category).map(
+          (part) => ({
+            id:
+              part?.id || null,
+            name:
+              part?.name || null
+          })
+        )
+    }));
 }
 
 async function fetchCategoryDump(
   accessToken
 ) {
-  const response = await fetch(
-    CATEGORY_DUMP_URL,
-    {
-      method: "GET",
-      headers: {
-        Authorization:
-          `Bearer ${accessToken}`,
-        Accept:
-          "application/json"
+  const response =
+    await fetch(
+      CATEGORY_DUMP_URL,
+      {
+        method: "GET",
+        headers: {
+          Authorization:
+            `Bearer ${accessToken}`,
+          Accept:
+            "application/json"
+        }
       }
-    }
-  );
+    );
 
   if (!response.ok) {
     let detail = "";
 
     try {
-      const body =
-        await response.text();
-
-      detail = body
-        .replace(/\s+/g, " ")
-        .slice(0, 300);
+      detail =
+        (
+          await response.text()
+        )
+          .replace(/\s+/g, " ")
+          .slice(0, 300);
     } catch {
-      // Sem detalhe adicional.
+      // sem detalhe
     }
 
     throw new Error(
@@ -151,31 +245,33 @@ async function fetchCategoryDump(
     );
   }
 
-  const contentCreated =
-    response.headers.get(
-      "x-content-created"
-    );
+  const metadata = {
+    contentCreated:
+      response.headers.get(
+        "x-content-created"
+      ) || null,
 
-  const contentMd5 =
-    response.headers.get(
-      "x-content-md5"
-    );
+    contentMd5:
+      response.headers.get(
+        "x-content-md5"
+      ) || null,
 
-  const contentType =
-    response.headers.get(
-      "content-type"
-    );
+    contentType:
+      response.headers.get(
+        "content-type"
+      ) || null,
 
-  const contentEncoding =
-    response.headers.get(
-      "content-encoding"
-    );
+    contentEncoding:
+      response.headers.get(
+        "content-encoding"
+      ) || null
+  };
 
   let data;
 
   try {
-    // O fetch do Node/Vercel descomprime gzip automaticamente.
-    data = await response.json();
+    data =
+      await response.json();
   } catch {
     throw new Error(
       "Recebi o dump, mas não consegui interpretar o JSON."
@@ -184,16 +280,7 @@ async function fetchCategoryDump(
 
   return {
     data,
-    metadata: {
-      contentCreated:
-        contentCreated || null,
-      contentMd5:
-        contentMd5 || null,
-      contentType:
-        contentType || null,
-      contentEncoding:
-        contentEncoding || null
-    }
+    metadata
   };
 }
 
@@ -207,20 +294,19 @@ export default async function handler(
       "GET"
     );
 
-    return res.status(405).json({
-      ok: false,
-      error:
-        "Use GET."
-    });
+    return res
+      .status(405)
+      .json({
+        ok: false,
+        error: "Use GET."
+      });
   }
 
   try {
     const tokenData =
       await getValidMlTokenData();
 
-    if (
-      !tokenData?.access_token
-    ) {
+    if (!tokenData?.access_token) {
       throw new Error(
         "Mercado Livre não está conectado."
       );
@@ -234,83 +320,106 @@ export default async function handler(
         tokenData.access_token
       );
 
-    const roots =
-      getRoots(data);
+    const categories =
+      normalizeCategories(data);
 
-    if (!roots.length) {
+    if (!categories.length) {
       throw new Error(
-        "O Mercado Livre retornou o dump, mas não encontrei categorias na resposta."
+        "O dump foi recebido, mas nenhuma categoria válida foi encontrada."
       );
     }
 
+    const {
+      roots,
+      strategy
+    } =
+      findRoots(categories);
+
     const stats =
-      walkCategoryTree(
-        roots
+      calculateStats(
+        categories
       );
 
-    const topLevel =
-      summarizeRoots(
-        roots
-      );
+    return res
+      .status(200)
+      .json({
+        ok: true,
 
-    return res.status(200).json({
-      ok: true,
+        siteId: SITE_ID,
 
-      siteId: SITE_ID,
+        source:
+          "mercadolivre_category_dump",
 
-      source:
-        "mercadolivre_category_dump",
+        dumpShape:
+          Array.isArray(data)
+            ? "array"
+            : "object",
 
-      dumpShape:
-        Array.isArray(data)
-          ? "array"
-          : "object",
+        metadata,
 
-      metadata,
+        // Agora o número de raízes representa
+        // apenas categorias cujo path_from_root
+        // começa e termina nelas mesmas.
+        rootCategories:
+          roots.length,
 
-      rootCategories:
-        roots.length,
+        totalCategories:
+          stats.totalCategories,
 
-      totalCategories:
-        stats.totalCategories,
+        leafCategories:
+          stats.leafCategories,
 
-      leafCategories:
-        stats.leafCategories,
+        maxDepth:
+          stats.maxDepth,
 
-      maxDepth:
-        stats.maxDepth,
+        uniqueCategoryIds:
+          stats.totalCategories,
 
-      uniqueCategoryIds:
-        stats.uniqueIds,
+        categoriesWithPath:
+          stats.categoriesWithPath,
 
-      topLevel,
+        hierarchyStrategy:
+          strategy,
 
-      // Segurança:
-      // nenhum token é devolvido pelo endpoint.
-      accessTokenExposed:
-        false,
+        depthDistribution:
+          stats.depthDistribution,
 
-      refreshTokenExposed:
-        false,
+        topLevel:
+          rootSummary(roots),
 
-      persisted:
-        false,
+        deepestSamples:
+          deepestSamples(
+            categories,
+            stats.maxDepth
+          ),
 
-      nextStep:
-        "Depois de validar este dump, podemos persistir a árvore para uso interno do T&T."
-    });
+        accessTokenExposed:
+          false,
+
+        refreshTokenExposed:
+          false,
+
+        persisted:
+          false,
+
+        nextStep:
+          "Se esta hierarquia estiver correta, a próxima etapa será persistir o dump completo para uso interno do T&T."
+      });
   } catch (error) {
-    return res.status(500).json({
-      ok: false,
-      error:
-        error?.message ||
-        "Erro desconhecido.",
+    return res
+      .status(500)
+      .json({
+        ok: false,
 
-      accessTokenExposed:
-        false,
+        error:
+          error?.message ||
+          "Erro desconhecido.",
 
-      refreshTokenExposed:
-        false
-    });
+        accessTokenExposed:
+          false,
+
+        refreshTokenExposed:
+          false
+      });
   }
 }

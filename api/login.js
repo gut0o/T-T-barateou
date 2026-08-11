@@ -24,15 +24,56 @@ export default async function handler(req, res) {
   );
   const state = base64url(crypto.randomBytes(24));
 
+  // NOVO: podemos testar diretamente um link curto/de afiliado.
+  // Exemplo:
+  // /api/login?link=https://meli.la/2EMjkct
+  const link = String(req.query.link || "").trim();
+
+  // Mantém compatibilidade com o teste antigo por item.
   const item = String(req.query.item || "").trim().toUpperCase();
   const itemValido = /^MLB\d+$/.test(item) ? item : "";
+
+  let linkValido = "";
+  if (link) {
+    try {
+      const parsed = new URL(link);
+
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        throw new Error("protocolo inválido");
+      }
+
+      const host = parsed.hostname.toLowerCase();
+
+      // Limitamos o teste a domínios do ecossistema Mercado Livre.
+      const permitido =
+        host === "meli.la" ||
+        host === "mercadolivre.com.br" ||
+        host.endsWith(".mercadolivre.com.br") ||
+        host === "mercadolibre.com" ||
+        host.endsWith(".mercadolibre.com");
+
+      if (!permitido) {
+        return res.status(400).send(
+          "O parâmetro link precisa ser um link do Mercado Livre/meli.la."
+        );
+      }
+
+      linkValido = parsed.toString();
+    } catch {
+      return res.status(400).send("Link de teste inválido.");
+    }
+  }
 
   const cookies = [
     `ml_pkce_verifier=${encodeURIComponent(codeVerifier)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=600`,
     `ml_oauth_state=${encodeURIComponent(state)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=600`
   ];
 
-  if (itemValido) {
+  if (linkValido) {
+    cookies.push(
+      `ml_test_link=${encodeURIComponent(linkValido)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=600`
+    );
+  } else if (itemValido) {
     cookies.push(
       `ml_test_item=${encodeURIComponent(itemValido)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=600`
     );

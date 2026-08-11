@@ -1,31 +1,51 @@
-# T&T Barateou — OAuth Etapa 2
+# T&T Barateou
 
-Copie os arquivos `login.js` e `callback.js` para a pasta `api/` do projeto.
+## Etapa atual: resolver corretamente o link de afiliado
+
+O OAuth do Mercado Livre já está funcionando.
+
+Nesta versão, em vez de informar manualmente um `MLB...`, o teste recebe
+diretamente um link de afiliado:
+
+```text
+https://t-t-barateou.vercel.app/api/login?link=https://meli.la/2EMjkct
+```
+
+O fluxo:
+
+1. autentica a conta via OAuth + PKCE;
+2. segue o redirecionamento do link `meli.la`;
+3. analisa URLs canônicas, `og:url` e dados estruturados da página;
+4. separa candidatos a item de candidatos a produto de catálogo;
+5. testa:
+   - `/items/{ID}`
+   - `/items?ids={ID}`
+   - `/products/{ID}`
+6. mostra qual ID realmente funciona e os erros dos demais.
+
+O link de afiliado original é preservado para ser usado posteriormente na
+mensagem do WhatsApp.
 
 ## Variáveis no Vercel
 
-Em **Settings → Environment Variables**, crie:
+```text
+ML_CLIENT_ID
+ML_CLIENT_SECRET
+ML_REDIRECT_URI
+```
 
-- `ML_CLIENT_ID`
-- `ML_CLIENT_SECRET`
-- `ML_REDIRECT_URI`
+Redirect URI:
 
-Use esta Redirect URI:
+```text
+https://t-t-barateou.vercel.app/api/callback
+```
 
-`https://t-t-barateou.vercel.app/api/callback`
+Nunca salve o `ML_CLIENT_SECRET` no GitHub.
 
-Não coloque o Client Secret no GitHub.
+## Teste antigo ainda suportado
 
-## Teste
+```text
+https://t-t-barateou.vercel.app/api/login?item=MLB2766771378
+```
 
-Depois do deploy, abra:
-
-`https://t-t-barateou.vercel.app/api/login`
-
-Para testar também o item que antes deu 403:
-
-`https://t-t-barateou.vercel.app/api/login?item=MLB2766771378`
-
-O fluxo autentica sua conta, testa `/users/me` e, se houver `item`, consulta `/items/{ID}` com o access token.
-
-Os tokens não são exibidos nem persistidos nesta etapa.
+Mas o teste recomendado agora é usando `?link=`.

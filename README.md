@@ -1,145 +1,50 @@
-# T&T Barateou
+# T&T Barateou — Etapa 6.4A
 
-## Etapa atual: resolver corretamente o link de afiliado
+Esta etapa corrige a obtenção da imagem.
 
-O OAuth do Mercado Livre já está funcionando.
-
-Nesta versão, em vez de informar manualmente um `MLB...`, o teste recebe
-diretamente um link de afiliado:
+Em vez de raspar o HTML da página do Mercado Livre, o backend usa:
 
 ```text
-https://t-t-barateou.vercel.app/api/login?link=https://meli.la/2EMjkct
+GET https://api.mercadolibre.com/products/MLB18725310
 ```
 
-O fluxo:
+com o token do Mercado Livre que já está persistido no Vercel.
 
-1. autentica a conta via OAuth + PKCE;
-2. segue o redirecionamento do link `meli.la`;
-3. analisa URLs canônicas, `og:url` e dados estruturados da página;
-4. separa candidatos a item de candidatos a produto de catálogo;
-5. testa:
-   - `/items/{ID}`
-   - `/items?ids={ID}`
-   - `/products/{ID}`
-6. mostra qual ID realmente funciona e os erros dos demais.
+## Instalação
 
-O link de afiliado original é preservado para ser usado posteriormente na
-mensagem do WhatsApp.
-
-## Variáveis no Vercel
+Copie:
 
 ```text
-ML_CLIENT_ID
-ML_CLIENT_SECRET
-ML_REDIRECT_URI
+api/offer-test.js
 ```
 
-Redirect URI:
+para a pasta `api` do projeto.
+
+Não altere `lib/ml-token-store.js`.
+
+Depois faça commit/push para o GitHub para o Vercel publicar.
+
+## Teste
+
+Abra:
 
 ```text
-https://t-t-barateou.vercel.app/api/callback
+https://t-t-barateou.vercel.app/api/offer-test
 ```
 
-Nunca salve o `ML_CLIENT_SECRET` no GitHub.
+Esperado:
 
-## Teste antigo ainda suportado
-
-```text
-https://t-t-barateou.vercel.app/api/login?item=MLB2766771378
+```json
+{
+  "ok": true,
+  "productId": "MLB18725310",
+  "title": "...",
+  "image": "https://...",
+  "price": 59.9,
+  "affiliateLink": "https://meli.la/2EMjkct",
+  "accessTokenExposed": false,
+  "refreshTokenExposed": false
+}
 ```
 
-Mas o teste recomendado agora é usando `?link=`.
-
-
-## Etapa 4 — preço e oferta vencedora
-
-Quando o candidato encontrado é um produto de catálogo (`/products/{PRODUCT_ID}`),
-o callback agora:
-
-1. lê `buy_box_winner`;
-2. obtém `item_id`, `price`, `original_price` e moeda quando disponíveis;
-3. tenta consultar `/items/{ITEM_ID}/sale_price?context=channel_marketplace`;
-4. se `buy_box_winner` vier vazio, consulta `/products/{PRODUCT_ID}/items` e usa
-   uma oferta com preço como fallback;
-5. calcula o percentual de desconto quando existe preço original;
-6. gera uma prévia da mensagem que mais tarde será enviada ao WhatsApp.
-
-O link de afiliado original continua sendo preservado.
-
-
-# Etapa 5 — tokens persistentes e refresh automático
-
-Nesta etapa o OAuth deixa de existir apenas durante uma requisição.
-
-## Armazenamento
-
-Os tokens são:
-
-1. criptografados no backend usando AES-256-GCM;
-2. gravados em um Vercel Blob **privado**;
-3. salvos em arquivos imutáveis versionados;
-4. nunca exibidos nas páginas de resposta.
-
-Isso é importante porque o Mercado Livre devolve um novo `refresh_token` a
-cada renovação, e somente o último refresh token pode continuar sendo usado.
-
-## Configuração no Vercel
-
-### 1. Criar Blob privado
-
-No projeto:
-
-`Storage → Create Database → Blob → Private`
-
-Conecte o Blob ao projeto. O Vercel adicionará automaticamente:
-
-`BLOB_READ_WRITE_TOKEN`
-
-### 2. Criar chave de criptografia
-
-No seu terminal local:
-
-```powershell
-node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
-```
-
-Copie a saída.
-
-No Vercel, crie uma variável **Sensitive**:
-
-```text
-ML_TOKEN_ENCRYPTION_KEY=COLE_A_CHAVE_AQUI
-```
-
-Não salve essa chave no GitHub.
-
-### 3. Redeploy
-
-Depois que o Blob e a variável estiverem configurados, faça um redeploy.
-
-### 4. Fazer OAuth uma vez novamente
-
-Abra, por exemplo:
-
-```text
-https://t-t-barateou.vercel.app/api/login?link=https%3A%2F%2Fmeli.la%2F2EMjkct
-```
-
-Ao concluir, a tela deve mostrar:
-
-`Tokens persistidos com segurança ✅`
-
-### 5. Testar persistência
-
-Sem fazer login novamente, abra:
-
-```text
-https://t-t-barateou.vercel.app/api/ml-status
-```
-
-A rota NÃO mostra access token nem refresh token. Ela mostra apenas metadata
-como usuário, expiração e se a renovação automática está pronta.
-
-A futura integração com WhatsApp poderá chamar `getValidMlTokenData()`.
-Se o access token estiver próximo de expirar, o helper troca o refresh token
-por um novo par de tokens e salva a nova versão automaticamente.
+O endpoint não expõe os tokens.

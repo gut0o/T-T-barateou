@@ -1029,6 +1029,165 @@ function titleOf(data) {
   );
 }
 
+
+async function getCategoryName(
+  categoryId,
+  accessToken
+) {
+  if (!categoryId) {
+    return null;
+  }
+
+  const result = await mlRequest(
+    `/categories/${encodeURIComponent(categoryId)}`,
+    accessToken
+  );
+
+  if (!result.ok) {
+    return null;
+  }
+
+  return (
+    result.data?.name ||
+    null
+  );
+}
+
+async function enrichCategoryInfo({
+  categoryId = null,
+  itemId = null,
+  product = null,
+  accessToken
+}) {
+  let resolvedCategoryId =
+    categoryId ||
+    product?.category_id ||
+    null;
+
+  let domainId =
+    product?.domain_id ||
+    null;
+
+  // Em produtos de catálogo, às vezes a categoria fica mais
+  // clara no anúncio vencedor/selecionado.
+  if (
+    !resolvedCategoryId &&
+    itemId
+  ) {
+    const itemResult =
+      await mlRequest(
+        `/items/${encodeURIComponent(itemId)}`,
+        accessToken
+      );
+
+    if (itemResult.ok) {
+      resolvedCategoryId =
+        itemResult.data?.category_id ||
+        resolvedCategoryId;
+
+      domainId =
+        itemResult.data?.domain_id ||
+        domainId;
+    }
+  }
+
+  const categoryName =
+    await getCategoryName(
+      resolvedCategoryId,
+      accessToken
+    );
+
+  return {
+    categoryId:
+      resolvedCategoryId,
+    categoryName,
+    domainId
+  };
+}
+
+function categoryIdFromSocialPages(
+  pages,
+  itemId
+) {
+  const normalizedItem =
+    normalizeMlb(itemId);
+
+  if (!normalizedItem) {
+    return null;
+  }
+
+  for (const page of pages || []) {
+    if (!page?.html) {
+      continue;
+    }
+
+    const normalized =
+      normalizeJsonishText(
+        page.html
+      );
+
+    const itemIndex =
+      normalized.indexOf(
+        normalizedItem
+      );
+
+    if (itemIndex < 0) {
+      continue;
+    }
+
+    const start =
+      Math.max(
+        0,
+        itemIndex - 12000
+      );
+
+    const end =
+      Math.min(
+        normalized.length,
+        itemIndex + 18000
+      );
+
+    const window =
+      normalized.slice(
+        start,
+        end
+      );
+
+    const match =
+      window.match(
+        /"category_id"\s*:\s*"(MLB\d+)"/i
+      );
+
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  // Último fallback: páginas sociais costumam trazer
+  // a categoria do produto principal no evento de trigger.
+  for (const page of pages || []) {
+    if (!page?.html) {
+      continue;
+    }
+
+    const normalized =
+      normalizeJsonishText(
+        page.html
+      );
+
+    const match =
+      normalized.match(
+        /"trigger"\s*:\s*\{[\s\S]{0,600}?"category_id"\s*:\s*"(MLB\d+)"/i
+      );
+
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return null;
+}
+
 async function getCatalogOffer(product, accessToken) {
   let offer = product?.buy_box_winner || null;
   let priceSource =
@@ -1146,6 +1305,16 @@ async function testProductCandidate(
     accessToken
   );
 
+  const category =
+    await enrichCategoryInfo({
+      categoryId:
+        product?.category_id ||
+        null,
+      itemId: offer.itemId,
+      product,
+      accessToken
+    });
+
   return {
     resolutionType: "product",
     sourceId: product.id,
@@ -1156,7 +1325,13 @@ async function testProductCandidate(
     price: offer.price,
     originalPrice: offer.originalPrice,
     currency: offer.currency,
-    priceSource: offer.priceSource
+    priceSource: offer.priceSource,
+    categoryId:
+      category.categoryId,
+    categoryName:
+      category.categoryName,
+    domainId:
+      category.domainId
   };
 }
 
@@ -1540,6 +1715,12 @@ async function testItemPageFallback(
   const itemId =
     normalizeMlb(candidate.id);
 
+  const socialCategoryId =
+    categoryIdFromSocialPages(
+      pages,
+      itemId
+    );
+
   return {
     resolutionType:
       page?.html
@@ -1561,7 +1742,11 @@ async function testItemPageFallback(
               ? "mercadolivre_social_page"
               : "mercadolivre_public_page"
           )
-        : "mercadolivre_social_page"
+        : "mercadolivre_social_page",
+    categoryId:
+      socialCategoryId,
+    categoryName: null,
+    domainId: null
   };
 }
 
@@ -1615,6 +1800,16 @@ async function testItemCandidate(
     }
   }
 
+  const category =
+    await enrichCategoryInfo({
+      categoryId:
+        item.category_id ||
+        null,
+      itemId: item.id,
+      product: item,
+      accessToken
+    });
+
   return {
     resolutionType: "item",
     sourceId: item.id,
@@ -1631,7 +1826,13 @@ async function testItemCandidate(
         ? item.original_price
         : null,
     currency: item.currency_id || "BRL",
-    priceSource: "item"
+    priceSource: "item",
+    categoryId:
+      category.categoryId,
+    categoryName:
+      category.categoryName,
+    domainId:
+      category.domainId
   };
 }
 
@@ -1750,6 +1951,17 @@ export default async function handler(req, res) {
 
     const offer = found.offer;
 
+    if (
+      offer.categoryId &&
+      !offer.categoryName
+    ) {
+      offer.categoryName =
+        await getCategoryName(
+          offer.categoryId,
+          tokenData.access_token
+        );
+    }
+
     if (!offer.image) {
       return res.status(502).json({
         ok: false,
@@ -1792,6 +2004,16 @@ export default async function handler(req, res) {
       discount,
       currency: offer.currency,
       priceSource: offer.priceSource,
+
+      // Etapa 6.7A:
+      // começamos a ensinar o sistema a reconhecer a
+      // categoria antes de automatizar o roteamento.
+      categoryId:
+        offer.categoryId || null,
+      categoryName:
+        offer.categoryName || null,
+      domainId:
+        offer.domainId || null,
 
       accessTokenExposed: false,
       refreshTokenExposed: false

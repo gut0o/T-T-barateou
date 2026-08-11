@@ -1,70 +1,67 @@
-# T&T Barateou — Etapa 6.5E
+# T&T Barateou — Etapa 6.7A
 
-Esta versão melhora o fallback dos links `/social/`.
-
-O diagnóstico do link:
+Objetivo desta microetapa:
 
 ```text
-https://meli.la/1wpNZf4
+link
+↓
+produto
+↓
+preço
+↓
+imagem
+↓
+categoria
 ```
 
-mostrou:
+Ainda não muda nada no WhatsApp.
 
-```text
-ogTitle:
-Vestido Longo Tecido Crepinho C/forro Lastex Moda Evangélica
+## O que foi adicionado
 
-item:
-MLB3976572103
+O `/api/offer` agora tenta retornar também:
+
+```json
+{
+  "categoryId": "MLB...",
+  "categoryName": "...",
+  "domainId": "..."
+}
 ```
 
-A versão nova do `api/offer.js` mantém em memória as páginas
-desktop/mobile usadas para resolver o link e, se a API/página
-direta do anúncio não entregar tudo, tenta aproveitar os dados
-da própria página social.
-
-Ela procura, perto do ID correto do anúncio:
-
-- `price`;
-- `current_price`;
-- `sale_price`;
-- preço anterior;
-- estruturas `fraction` + `cents`.
-
-Também usa `og:title` e `og:image` como fallback.
+A categoria é buscada primeiro pelos dados oficiais do
+produto/anúncio. Nos casos de fallback social, o código também
+tenta localizar `category_id` perto do produto correto na página.
 
 ## Copiar
 
-Substitua:
+Substitua somente:
 
 ```text
 api/offer.js
 ```
 
-pelo arquivo deste ZIP.
-
 ## Deploy
 
 ```powershell
 git add .
-git commit -m "Melhora fallback de links sociais e precos"
+git commit -m "Adiciona categoria nas ofertas"
 git push
 ```
 
-## Teste
+## Primeiro teste
 
-Depois do deploy:
+Depois do deploy, abra o vestido:
 
 ```text
 https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F1wpNZf4
 ```
 
-Ainda NÃO alteramos o WhatsApp.
+Procure no final do JSON por:
 
-Se retornar `ok:true`, execute novamente:
-
-```powershell
-node whatsapp/send-offer.js
+```text
+categoryId
+categoryName
+domainId
 ```
 
-e confira a prévia antes de responder `S`.
+Não altere `listen-offers.js` nesta etapa.

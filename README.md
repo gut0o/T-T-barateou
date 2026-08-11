@@ -1,93 +1,88 @@
-# T&T Barateou — Etapa 6.7C
+# T&T Barateou — Etapa 6.7D
 
 Objetivo:
 
 ```text
-Mercado Livre
+categoryId
 ↓
-dump completo MLB
+árvore salva no Blob
 ↓
-Vercel Blob privado
+categoria exata
 ↓
-árvore persistida
+caminho completo
+↓
+categoria principal
 ```
 
 Nesta etapa:
 
 - NÃO alteramos o WhatsApp.
 - NÃO alteramos o `api/offer.js`.
-- NÃO alteramos o `api/categories-tree.js`.
-- Usamos o mesmo Blob privado já conectado ao projeto.
-- Não criamos nenhuma variável de ambiente nova.
+- NÃO baixamos a árvore novamente do Mercado Livre.
+- Usamos apenas a versão já salva no Blob privado.
 
-## Arquivos novos
+## Arquivo novo
 
-Copie estes 2 arquivos:
+Copie apenas:
 
 ```text
-lib/ml-categories-store.js
-api/categories-sync.js
+api/category-lookup.js
 ```
 
 ## Deploy
 
 ```powershell
 git add .
-git commit -m "Persiste arvore de categorias no Blob"
+git commit -m "Adiciona consulta de categoria salva"
 git push
 ```
 
-## Teste
+## Primeiro teste
 
-Depois que o Vercel terminar o deploy, abra:
+Use a categoria do vestido:
 
 ```text
-https://t-t-barateou.vercel.app/api/categories-sync
+https://t-t-barateou.vercel.app/api/category-lookup?categoryId=MLB108704
 ```
 
-Na primeira execução esperamos algo parecido com:
+Esperamos algo parecido com:
 
 ```json
 {
   "ok": true,
-  "rootCategories": 32,
-  "totalCategories": 12237,
-  "maxDepth": 7,
-  "persisted": true,
-  "alreadyCurrent": false
+  "categoryId": "MLB108704",
+  "categoryName": "Vestidos",
+  "rootCategory": {
+    "id": "MLB1430",
+    "name": "Calçados, Roupas e Bolsas"
+  },
+  "depth": 3,
+  "path": [
+    {
+      "id": "MLB1430",
+      "name": "Calçados, Roupas e Bolsas"
+    }
+  ]
 }
 ```
 
-O número total pode mudar se o Mercado Livre atualizar a árvore.
+O caminho real pode ter mais níveis.
 
-## Segundo teste
+## O que isso nos dá
 
-Abra o MESMO endpoint novamente:
-
-```text
-https://t-t-barateou.vercel.app/api/categories-sync
-```
-
-Se o Mercado Livre ainda estiver servindo a mesma versão,
-esperamos:
-
-```json
-{
-  "persisted": true,
-  "alreadyCurrent": true
-}
-```
-
-Isso confirma que não estamos criando cópias repetidas da
-mesma versão.
-
-## Importante
-
-O endpoint não devolve o conteúdo completo da árvore e não
-expõe tokens.
-
-A árvore fica em um caminho privado parecido com:
+Depois desta etapa, o T&T consegue transformar:
 
 ```text
-tt/ml-categories/MLB-<md5>.json
+MLB108704
 ```
+
+em algo como:
+
+```text
+Vestidos
+→ Roupas
+→ Calçados, Roupas e Bolsas
+```
+
+A próxima etapa poderá ligar a categoria principal
+à tabela de comissão.

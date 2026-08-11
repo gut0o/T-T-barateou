@@ -1,11 +1,16 @@
 import { getValidMlTokenData } from "../lib/ml-token-store.js";
 
-const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-  "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36";
+const USER_AGENTS = {
+  desktop:
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+  mobile:
+    "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36"
+};
 
 const MAX_HTML_SIZE = 4_000_000;
-const MAX_CANDIDATES_TO_TEST = 18;
+const MAX_CANDIDATES_TO_TEST = 30;
 
 function isAllowedInitialHost(hostname) {
   const host = String(hostname || "").toLowerCase();
@@ -122,6 +127,117 @@ function addCandidate(
   }
 }
 
+
+function safeDecodeURIComponent(value) {
+  let current = String(value || "");
+
+  // Há páginas sociais do ML com URLs codificadas mais de uma vez.
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      const decoded = decodeURIComponent(current);
+
+      if (decoded === current) {
+        break;
+      }
+
+      current = decoded;
+    } catch {
+      break;
+    }
+  }
+
+  return current;
+}
+
+function expandNestedEncodedUrls(html) {
+  const variants = new Set();
+  const base = decodeHtmlEntities(html);
+
+  variants.add(base);
+
+  // Decodifica o documento inteiro uma ou duas vezes.
+  // Isso revela padrões como:
+  // url=https%3A%2F%2Fproduto.mercadolivre.com.br%2FMLB-...
+  let decoded = base;
+
+  for (let i = 0; i < 2; i += 1) {
+    const next = safeDecodeURIComponent(decoded);
+
+    if (next === decoded) {
+      break;
+    }
+
+    variants.add(next);
+    decoded = next;
+  }
+
+  // Também extrai especificamente parâmetros "url=" presentes
+  // em wrappers/deep links como ddnf.adj.st/webview.
+  const paramRegex =
+    /(?:[?&]|["'])url=([^"'&<>\s]+)/gi;
+
+  for (const source of [...variants]) {
+    for (const match of source.matchAll(paramRegex)) {
+      if (!match[1]) continue;
+
+      const nested = safeDecodeURIComponent(
+        decodeHtmlEntities(match[1])
+      );
+
+      if (nested) {
+        variants.add(nested);
+      }
+
+      if (variants.size >= 40) {
+        break;
+      }
+    }
+
+    if (variants.size >= 40) {
+      break;
+    }
+  }
+
+  return [...variants];
+}
+
+function addNestedUrlCandidates(candidates, html) {
+  const variants = expandNestedEncodedUrls(html);
+
+  for (const source of variants) {
+    // URL direta de anúncio:
+    // https://produto.mercadolivre.com.br/MLB-4049279695-...
+    const directItemUrlRegex =
+      /https?:\/\/(?:produto\.)?mercadolivre\.com\.br\/MLB-?(\d{6,})[^"'<>\\\s]*/gi;
+
+    for (const match of source.matchAll(directItemUrlRegex)) {
+      addCandidate(
+        candidates,
+        `MLB${match[1]}`,
+        "item",
+        "URL interna decodificada",
+        match[0],
+        120
+      );
+    }
+
+    // URL de catálogo /p/MLB...
+    const directCatalogUrlRegex =
+      /https?:\/\/(?:www\.)?mercadolivre\.com\.br\/[^"'<>\\\s]*\/p\/(MLB-?\d{6,})[^"'<>\\\s]*/gi;
+
+    for (const match of source.matchAll(directCatalogUrlRegex)) {
+      addCandidate(
+        candidates,
+        match[1],
+        "product",
+        "URL interna de catálogo decodificada",
+        match[0],
+        125
+      );
+    }
+  }
+}
+
 function collectUrls(html, finalUrl) {
   const urls = new Set();
 
@@ -164,6 +280,11 @@ function collectUrls(html, finalUrl) {
 
 function collectCandidates(html, finalUrl) {
   const candidates = new Map();
+
+  // Casos de link social podem esconder o anúncio dentro de
+  // URLs percent-encoded em deep links/wrappers.
+  addNestedUrlCandidates(candidates, html);
+
   const urls = collectUrls(html, finalUrl);
 
   // O endereço efetivamente resolvido tem prioridade máxima.
@@ -317,13 +438,14 @@ function collectCandidates(html, finalUrl) {
   );
 }
 
-async function resolveAffiliateLink(link) {
-  const response = await fetch(link, {
+async function fetchResolvedPage(url, userAgent) {
+  const response = await fetch(url, {
     method: "GET",
     redirect: "follow",
     headers: {
-      "User-Agent": USER_AGENT,
-      Accept: "text/html,application/xhtml+xml"
+      "User-Agent": userAgent,
+      Accept: "text/html,application/xhtml+xml",
+      "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8"
     }
   });
 
@@ -367,8 +489,85 @@ async function resolveAffiliateLink(link) {
     );
   }
 
+  return {
+    finalUrl,
+    html
+  };
+}
+
+async function resolveAffiliateLink(link) {
+  const desktop = await fetchResolvedPage(
+    link,
+    USER_AGENTS.desktop
+  );
+
+  const mergedCandidates = new Map();
+
+  function mergeCandidates(list) {
+    for (const candidate of list) {
+      const key = `${candidate.type}:${candidate.id}`;
+
+      if (!mergedCandidates.has(key)) {
+        mergedCandidates.set(key, candidate);
+        continue;
+      }
+
+      const existing = mergedCandidates.get(key);
+
+      existing.score = Math.max(
+        existing.score,
+        candidate.score
+      );
+
+      existing.sources = [
+        ...new Set([
+          ...(existing.sources || []),
+          ...(candidate.sources || [])
+        ])
+      ];
+
+      existing.evidence = [
+        ...new Set([
+          ...(existing.evidence || []),
+          ...(candidate.evidence || [])
+        ])
+      ].slice(0, 3);
+    }
+  }
+
+  mergeCandidates(
+    collectCandidates(
+      desktop.html,
+      desktop.finalUrl
+    )
+  );
+
+  // No perfil social do Mercado Livre alguns links internos
+  // de produto são renderizados apenas para user-agent mobile.
+  if (
+    /\/social\//i.test(desktop.finalUrl)
+  ) {
+    try {
+      const mobile = await fetchResolvedPage(
+        desktop.finalUrl,
+        USER_AGENTS.mobile
+      );
+
+      mergeCandidates(
+        collectCandidates(
+          mobile.html,
+          mobile.finalUrl
+        )
+      );
+    } catch {
+      // Desktop continua como fallback.
+    }
+  }
+
   const candidates =
-    collectCandidates(html, finalUrl);
+    [...mergedCandidates.values()].sort(
+      (a, b) => b.score - a.score
+    );
 
   if (!candidates.length) {
     throw new Error(
@@ -377,7 +576,7 @@ async function resolveAffiliateLink(link) {
   }
 
   return {
-    finalUrl,
+    finalUrl: desktop.finalUrl,
     candidates
   };
 }

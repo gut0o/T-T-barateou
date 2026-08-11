@@ -1,46 +1,65 @@
-# T&T Barateou — Etapa 6.5B (diagnóstico)
+# T&T Barateou — Etapa 6.5C
 
-Não altera o `/api/offer` e não envia nada para WhatsApp.
+Correção do endpoint dinâmico para links sociais do Mercado Livre.
+
+O diagnóstico mostrou um caso em que o `meli.la` abre:
+
+```text
+/social/gp...
+```
+
+e a página mobile contém uma URL interna codificada como:
+
+```text
+ddnf.adj.st/webview/?url=https%3A%2F%2Fproduto.mercadolivre.com.br%2FMLB-...
+```
+
+A nova versão de `api/offer.js`:
+
+1. resolve o link como desktop;
+2. se cair em `/social/`, também busca a versão mobile;
+3. decodifica URLs percent-encoded até 3 níveis;
+4. encontra links internos de anúncio e catálogo;
+5. dá prioridade alta a esses IDs;
+6. consulta a API do Mercado Livre normalmente;
+7. preserva o link afiliado original.
 
 ## Copiar
 
-Copie:
+Substitua:
 
 ```text
-api/offer-debug.js
+api/offer.js
 ```
 
-para a pasta `api` do projeto.
+pelo arquivo deste ZIP.
 
 ## Deploy
 
 ```powershell
 git add .
-git commit -m "Adiciona diagnostico de links sociais do Mercado Livre"
+git commit -m "Corrige resolucao de links sociais do Mercado Livre"
 git push
 ```
 
-Espere o Vercel publicar.
+## Teste que falhava
 
-## Testar o link que falhou
-
-Abra:
+Depois do deploy, abra:
 
 ```text
-https://t-t-barateou.vercel.app/api/offer-debug?link=https%3A%2F%2Fmeli.la%2F1B9vyix
+https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F1B9vyix
 ```
 
-Copie o JSON retornado e envie no chat.
+O produto esperado é:
 
-O diagnóstico testa:
+```text
+Tênis Masculino Feminino Kappa Park 2.0 Original
+```
 
-- desktop e mobile;
-- URL original;
-- `skipInApp=true`;
-- `forceInApp=false` + `skipInApp=true`;
-- meta tags;
-- IDs MLB presentes no HTML;
-- URLs relevantes;
-- pequenos trechos de campos como `productId`, `itemId`, `target`, `redirect`, etc.
+e o anúncio detectado pelo diagnóstico foi:
 
-Não há token do Mercado Livre nesse endpoint.
+```text
+MLB4049279695
+```
+
+Ainda NÃO há alteração no WhatsApp.

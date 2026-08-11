@@ -1911,6 +1911,28 @@ function calculateDiscount(price, originalPrice) {
   );
 }
 
+
+function estimateCommissionValue(
+  price,
+  percent
+) {
+  if (
+    typeof price !== "number" ||
+    !Number.isFinite(price) ||
+    typeof percent !== "number" ||
+    !Number.isFinite(percent)
+  ) {
+    return null;
+  }
+
+  return Number(
+    (
+      price *
+      (percent / 100)
+    ).toFixed(2)
+  );
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
@@ -1987,6 +2009,20 @@ export default async function handler(req, res) {
           tokenData.access_token
       });
 
+    const estimatedDirectCommission =
+      estimateCommissionValue(
+        offer.price,
+        categoryEnrichment
+          .directCommissionPercent
+      );
+
+    const estimatedIndirectCommission =
+      estimateCommissionValue(
+        offer.price,
+        categoryEnrichment
+          .indirectCommissionPercent
+      );
+
     if (!offer.image) {
       return res.status(502).json({
         ok: false,
@@ -2059,6 +2095,19 @@ export default async function handler(req, res) {
 
       indirectCommissionPercent:
         categoryEnrichment.indirectCommissionPercent,
+
+      commissionGroup:
+        categoryEnrichment.commissionGroup,
+
+      commissionTableVersion:
+        categoryEnrichment.commissionTableVersion,
+
+      commissionSource:
+        categoryEnrichment.commissionSource,
+
+      estimatedDirectCommission,
+
+      estimatedIndirectCommission,
 
       categoryEnrichmentSource:
         categoryEnrichment.source,

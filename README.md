@@ -1,31 +1,41 @@
-# T&T Barateou — Etapa 6.7H
+# T&T Barateou — Etapa 6.7I
 
-Agora o `/api/offer` resolve automaticamente produtos que vierem
-com `domainId`, mas sem `categoryId`.
+Esta etapa FECHA a primeira versão da camada de comissão.
 
-Fluxo:
+## O que mudou
+
+A tabela agora usa os IDs das categorias principais do Mercado Livre,
+não apenas o nome textual.
+
+Também adicionamos:
 
 ```text
-link
-↓
-produto
-↓
-categoryId existe?
-├─ sim → árvore salva
-└─ não
-   ↓
-   domainId + título
-   ↓
-   API oficial de domínio do Mercado Livre
-   ↓
-   categoria segura
-   ↓
-   árvore salva
-   ↓
-   categoria principal
-   ↓
-   comissão
+commissionGroup
+commissionTableVersion
+commissionSource
+estimatedDirectCommission
+estimatedIndirectCommission
 ```
+
+## Segurança da regra
+
+Só cadastramos percentuais confirmados na tabela fornecida:
+
+```text
+16% / 8%
+12% / 6%
+5% / 2,5%
+```
+
+Categorias sem percentual confirmado continuam:
+
+```text
+commissionKnown: false
+```
+
+Isso inclui `Saúde` nesta versão.
+
+Não inventamos comissão.
 
 ## Arquivos
 
@@ -34,69 +44,62 @@ Substitua:
 ```text
 api/offer.js
 lib/ml-offer-category-enrichment.js
-```
-
-A Etapa 6.7G precisa continuar no projeto:
-
-```text
-lib/ml-domain-category.js
+lib/ml-affiliate-commissions.js
 ```
 
 ## Deploy
 
 ```powershell
 git add .
-git commit -m "Integra resolucao por dominio nas ofertas"
+git commit -m "Fecha camada de comissao das ofertas"
 git push
 ```
 
-## Primeiro teste — ar-condicionado
+## Teste 1 — vestido
+
+```text
+https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F1wpNZf4
+```
+
+Com preço de R$ 109,90 e comissão direta de 16% esperamos:
+
+```text
+estimatedDirectCommission: 17.58
+estimatedIndirectCommission: 8.79
+```
+
+## Teste 2 — ar-condicionado
 
 ```text
 https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F2RzSExj
 ```
 
-Esperamos algo parecido com:
+Com R$ 2.699 e 5% direta:
 
-```json
-{
-  "domainId": "MLB-AIR_CONDITIONERS",
-  "rootCategory": {
-    "name": "Eletrodomésticos"
-  },
-  "commissionKnown": true,
-  "directCommissionPercent": 5,
-  "indirectCommissionPercent": 2.5,
-  "categoryEnrichmentSource": "domain_resolver_plus_vercel_blob_saved_tree",
-  "domainCategoryResolutionType": "single_domain_category",
-  "resolvedCategoryId": "MLB1646"
-}
+```text
+estimatedDirectCommission: 134.95
+estimatedIndirectCommission: 67.48
 ```
 
-## Segundo teste — creatina
-
-Depois testaremos:
+## Teste 3 — creatina
 
 ```text
 https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F2EMjkct
 ```
 
-Esperamos que o título ajude o Mercado Livre a escolher:
-
-```text
-Suplementos Alimentares
-→ Saúde
-```
-
-Como `Saúde` ainda não está na tabela de comissão fornecida,
-esperamos:
+Como a categoria resolvida é Saúde e ainda não há percentual
+confirmado na tabela:
 
 ```text
 commissionKnown: false
+estimatedDirectCommission: null
+estimatedIndirectCommission: null
 ```
 
-Isso é correto e proposital.
+## Importante
 
-## WhatsApp
+Esses valores são estimativas com base no preço atual do produto e
+na taxa padrão cadastrada. Não representam garantia de pagamento,
+pois a venda ainda precisa ser atribuída e validada pelo programa.
 
-Ainda não alteramos nada no bot.
+O WhatsApp continua inalterado nesta etapa.

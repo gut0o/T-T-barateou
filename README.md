@@ -1,28 +1,30 @@
-# T&T Barateou — Etapa 6.5C
+# T&T Barateou — Etapa 6.5D
 
-Correção do endpoint dinâmico para links sociais do Mercado Livre.
+Esta versão mantém toda a lógica anterior e acrescenta
+um fallback para anúncios que existem publicamente, mas
+não ficam acessíveis no endpoint `/items/{id}` da API.
 
-O diagnóstico mostrou um caso em que o `meli.la` abre:
-
-```text
-/social/gp...
-```
-
-e a página mobile contém uma URL interna codificada como:
+## Como funciona
 
 ```text
-ddnf.adj.st/webview/?url=https%3A%2F%2Fproduto.mercadolivre.com.br%2FMLB-...
+meli.la
+  ↓
+página social
+  ↓
+URL interna do anúncio
+  ↓
+tenta API /items/{id}
+  ↓
+se bloquear:
+  ↓
+abre a página pública do anúncio
+  ↓
+JSON-LD / Open Graph
+  ↓
+nome + imagem + preço
 ```
 
-A nova versão de `api/offer.js`:
-
-1. resolve o link como desktop;
-2. se cair em `/social/`, também busca a versão mobile;
-3. decodifica URLs percent-encoded até 3 níveis;
-4. encontra links internos de anúncio e catálogo;
-5. dá prioridade alta a esses IDs;
-6. consulta a API do Mercado Livre normalmente;
-7. preserva o link afiliado original.
+O link afiliado original continua preservado.
 
 ## Copiar
 
@@ -38,28 +40,27 @@ pelo arquivo deste ZIP.
 
 ```powershell
 git add .
-git commit -m "Corrige resolucao de links sociais do Mercado Livre"
+git commit -m "Adiciona fallback para pagina publica do produto"
 git push
 ```
 
-## Teste que falhava
+## Testar
 
-Depois do deploy, abra:
+Depois do deploy:
 
 ```text
 https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F1B9vyix
 ```
 
-O produto esperado é:
+Esperamos agora:
 
 ```text
-Tênis Masculino Feminino Kappa Park 2.0 Original
+ok: true
+title: Tênis Masculino Feminino Kappa Park 2.0 Original
+itemId: MLB4049279695
+image: https://...
+price: ...
+priceSource: mercadolivre_public_page
 ```
 
-e o anúncio detectado pelo diagnóstico foi:
-
-```text
-MLB4049279695
-```
-
-Ainda NÃO há alteração no WhatsApp.
+Ainda não há alteração no WhatsApp.

@@ -758,6 +758,361 @@ async function testProductCandidate(
   };
 }
 
+
+function metaContent(html, attribute, value) {
+  const escaped = String(value).replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+
+  const patterns = [
+    new RegExp(
+      `<meta[^>]+${attribute}=["']${escaped}["'][^>]+content=["']([^"']+)["']`,
+      "i"
+    ),
+    new RegExp(
+      `<meta[^>]+content=["']([^"']+)["'][^>]+${attribute}=["']${escaped}["']`,
+      "i"
+    )
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+
+    if (match?.[1]) {
+      return decodeHtmlEntities(match[1]);
+    }
+  }
+
+  return null;
+}
+
+function parseNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value
+    .trim()
+    .replace(/\s/g, "")
+    .replace(/^R\$/i, "")
+    .replace(/\.(?=\d{3}(?:\D|$))/g, "")
+    .replace(",", ".");
+
+  const number = Number(normalized);
+
+  return Number.isFinite(number)
+    ? number
+    : null;
+}
+
+function walkJson(value, visitor) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const result = visitor(value);
+
+  if (result) {
+    return result;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = walkJson(item, visitor);
+
+      if (nested) {
+        return nested;
+      }
+    }
+
+    return null;
+  }
+
+  for (const child of Object.values(value)) {
+    const nested = walkJson(child, visitor);
+
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return null;
+}
+
+function findJsonLdProduct(html) {
+  const regex =
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+
+  for (const match of html.matchAll(regex)) {
+    const raw = decodeHtmlEntities(match[1]).trim();
+
+    if (!raw) continue;
+
+    try {
+      const parsed = JSON.parse(raw);
+
+      const product = walkJson(
+        parsed,
+        (value) => {
+          const type = value?.["@type"];
+
+          if (
+            type === "Product" ||
+            (
+              Array.isArray(type) &&
+              type.includes("Product")
+            )
+          ) {
+            return value;
+          }
+
+          return null;
+        }
+      );
+
+      if (product) {
+        return product;
+      }
+    } catch {
+      // Alguns scripts não são JSON válido. Ignoramos e
+      // continuamos procurando outro bloco estruturado.
+    }
+  }
+
+  return null;
+}
+
+function productImageFromJsonLd(product) {
+  const image = product?.image;
+
+  if (typeof image === "string") {
+    return image;
+  }
+
+  if (Array.isArray(image)) {
+    const first = image.find(
+      (value) => typeof value === "string"
+    );
+
+    if (first) {
+      return first;
+    }
+  }
+
+  if (
+    image &&
+    typeof image === "object"
+  ) {
+    return (
+      image.url ||
+      image.contentUrl ||
+      null
+    );
+  }
+
+  return null;
+}
+
+function offerFromJsonLd(product) {
+  const offers = product?.offers;
+
+  const offer =
+    Array.isArray(offers)
+      ? offers.find(Boolean)
+      : offers;
+
+  if (!offer || typeof offer !== "object") {
+    return {
+      price: null,
+      currency: null
+    };
+  }
+
+  const price =
+    parseNumber(offer.price) ??
+    parseNumber(offer.lowPrice) ??
+    parseNumber(
+      offer?.priceSpecification?.price
+    );
+
+  const currency =
+    offer.priceCurrency ||
+    offer?.priceSpecification?.priceCurrency ||
+    null;
+
+  return {
+    price,
+    currency
+  };
+}
+
+async function fetchPublicProductPage(url) {
+  const response = await fetch(url, {
+    redirect: "follow",
+    headers: {
+      "User-Agent": USER_AGENTS.desktop,
+      Accept:
+        "text/html,application/xhtml+xml",
+      "Accept-Language":
+        "pt-BR,pt;q=0.9,en;q=0.8"
+    }
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  let parsed;
+
+  try {
+    parsed = new URL(response.url);
+  } catch {
+    return null;
+  }
+
+  if (!isAllowedResolvedHost(parsed.hostname)) {
+    return null;
+  }
+
+  const html = await response.text();
+
+  if (
+    !html ||
+    html.length > MAX_HTML_SIZE
+  ) {
+    return null;
+  }
+
+  return {
+    finalUrl: response.url,
+    html
+  };
+}
+
+function directMercadoLivreUrl(candidate) {
+  const evidence =
+    Array.isArray(candidate?.evidence)
+      ? candidate.evidence
+      : [];
+
+  for (const value of evidence) {
+    const decoded =
+      safeDecodeURIComponent(
+        decodeHtmlEntities(value)
+      );
+
+    const match = decoded.match(
+      /https?:\/\/(?:produto\.)?mercadolivre\.com\.br\/MLB-?\d{6,}[^"'<>\\\s]*/i
+    );
+
+    if (match?.[0]) {
+      return match[0];
+    }
+  }
+
+  return null;
+}
+
+async function testItemPageFallback(candidate) {
+  const directUrl =
+    directMercadoLivreUrl(candidate);
+
+  if (!directUrl) {
+    return null;
+  }
+
+  const page =
+    await fetchPublicProductPage(directUrl);
+
+  if (!page) {
+    return null;
+  }
+
+  const product =
+    findJsonLdProduct(page.html);
+
+  const jsonOffer =
+    offerFromJsonLd(product);
+
+  const title =
+    product?.name ||
+    metaContent(
+      page.html,
+      "property",
+      "og:title"
+    ) ||
+    metaContent(
+      page.html,
+      "name",
+      "twitter:title"
+    ) ||
+    null;
+
+  const image =
+    productImageFromJsonLd(product) ||
+    metaContent(
+      page.html,
+      "property",
+      "og:image"
+    ) ||
+    metaContent(
+      page.html,
+      "name",
+      "twitter:image"
+    ) ||
+    null;
+
+  // Fallback adicional para preço exibido na página.
+  const htmlPrice =
+    parseNumber(
+      metaContent(
+        page.html,
+        "itemprop",
+        "price"
+      )
+    ) ??
+    parseNumber(
+      page.html.match(
+        /["']price["']\s*:\s*["']?(\d+(?:[.,]\d+)?)/i
+      )?.[1]
+    );
+
+  const price =
+    jsonOffer.price ??
+    htmlPrice;
+
+  if (
+    !title ||
+    !image ||
+    typeof price !== "number"
+  ) {
+    return null;
+  }
+
+  const itemId =
+    normalizeMlb(candidate.id);
+
+  return {
+    resolutionType: "item_page_fallback",
+    sourceId: itemId,
+    productId: null,
+    itemId,
+    title,
+    image,
+    price,
+    originalPrice: null,
+    currency:
+      jsonOffer.currency || "BRL",
+    priceSource:
+      "mercadolivre_public_page"
+  };
+}
+
 async function testItemCandidate(
   candidate,
   accessToken
@@ -768,7 +1123,11 @@ async function testItemCandidate(
   );
 
   if (!result.ok) {
-    return null;
+    // Alguns anúncios públicos existem normalmente no site,
+    // mas o endpoint /items/{id} pode negar o acesso para
+    // nossa aplicação. Nesses casos usamos a própria página
+    // pública do anúncio como fallback.
+    return testItemPageFallback(candidate);
   }
 
   const item = result.data;

@@ -1,84 +1,46 @@
-# T&T Barateou — Etapa 6.5A
+# T&T Barateou — Etapa 6.5B (diagnóstico)
 
-Nesta etapa o produto deixa de ser fixo.
+Não altera o `/api/offer` e não envia nada para WhatsApp.
 
-O novo endpoint recebe um link do Mercado Livre:
-
-```text
-/api/offer?link=https://meli.la/...
-```
-
-e tenta devolver:
-
-- nome;
-- imagem;
-- preço;
-- preço anterior, se a API realmente informar;
-- desconto, se houver preço anterior válido;
-- productId/itemId;
-- o link afiliado original.
-
-## 1. Copiar
+## Copiar
 
 Copie:
 
 ```text
-api/offer.js
+api/offer-debug.js
 ```
 
-para:
+para a pasta `api` do projeto.
 
-```text
-tt-afiliados-site/api/offer.js
-```
-
-Não apague `api/offer-test.js` ainda.
-
-## 2. Commit/push
+## Deploy
 
 ```powershell
 git add .
-git commit -m "Adiciona endpoint dinamico de ofertas"
+git commit -m "Adiciona diagnostico de links sociais do Mercado Livre"
 git push
 ```
 
-Espere o deploy do Vercel terminar.
+Espere o Vercel publicar.
 
-## 3. Primeiro teste
+## Testar o link que falhou
 
 Abra:
 
 ```text
-https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F2EMjkct
+https://t-t-barateou.vercel.app/api/offer-debug?link=https%3A%2F%2Fmeli.la%2F1B9vyix
 ```
 
-O resultado esperado é semelhante a:
+Copie o JSON retornado e envie no chat.
 
-```json
-{
-  "ok": true,
-  "affiliateLink": "https://meli.la/2EMjkct",
-  "productId": "MLB18725310",
-  "title": "Creatina 1kg ...",
-  "image": "https://http2.mlstatic.com/...",
-  "price": 59.9,
-  "currency": "BRL",
-  "accessTokenExposed": false,
-  "refreshTokenExposed": false
-}
-```
+O diagnóstico testa:
 
-## Segurança
+- desktop e mobile;
+- URL original;
+- `skipInApp=true`;
+- `forceInApp=false` + `skipInApp=true`;
+- meta tags;
+- IDs MLB presentes no HTML;
+- URLs relevantes;
+- pequenos trechos de campos como `productId`, `itemId`, `target`, `redirect`, etc.
 
-O endpoint aceita apenas:
-
-- `meli.la`;
-- domínios oficiais do Mercado Livre.
-
-Isso evita que o parâmetro `link` seja usado para fazer requisições arbitrárias a outros sites.
-
-## Importante
-
-Nesta etapa ainda NÃO há envio para WhatsApp.
-
-Primeiro vamos testar este endpoint com alguns links diferentes.
+Não há token do Mercado Livre nesse endpoint.

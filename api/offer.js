@@ -2030,7 +2030,7 @@ export default async function handler(req, res) {
     const offerScoring =
       calculateOfferScore({
         discount:
-          discountPercent(
+          calculateDiscount(
             offer.price,
             offer.originalPrice
           ),

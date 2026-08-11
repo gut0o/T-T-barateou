@@ -1,102 +1,49 @@
-# T&T Barateou — Etapa 6.7J
+# Correção Etapa 6.7J
 
-Objetivo:
-
-```text
-oferta
-↓
-desconto
-+ comissão
-+ ganho estimado
-↓
-pontuação interna
-↓
-prioridade
-```
-
-## Importante
-
-A pontuação NÃO aparece no anúncio do WhatsApp.
-
-Ela serve apenas para o sistema decidir quais ofertas
-merecem prioridade no futuro.
-
-## Escala
+Bug encontrado:
 
 ```text
-0 a 100
+discountPercent is not defined
 ```
 
-A primeira regra é:
+Causa:
+
+O código chamou `discountPercent()`, mas a função existente no
+`offer.js` se chama:
 
 ```text
-Desconto ................ até 40 pontos
-Comissão direta ......... até 30 pontos
-Ganho direto estimado ... até 30 pontos
+calculateDiscount()
 ```
 
-Prioridade:
+A correção altera somente essa chamada.
 
-```text
-60–100 = high
-35–59  = medium
-0–34   = low
-```
-
-Essa regra é apenas a versão inicial:
-
-```text
-scoreVersion: TT-1.0
-```
-
-Depois podemos ajustar com dados reais.
-
-## Arquivos
-
-Substitua:
+## Substituir
 
 ```text
 api/offer.js
 ```
 
-Adicione:
-
-```text
-lib/offer-scoring.js
-```
-
 ## Deploy
 
 ```powershell
-git add .
-git commit -m "Adiciona pontuacao interna das ofertas"
+git add api/offer.js
+git commit -m "Corrige calculo da pontuacao de oferta"
 git push
 ```
 
-## Primeiro teste — vestido
+## Teste
+
+Depois do deploy:
 
 ```text
 https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F1wpNZf4
 ```
 
-Com os dados atuais do vestido esperamos aproximadamente:
+Agora o endpoint deve voltar a responder `ok: true` e também mostrar:
 
 ```text
-discount: 27
-directCommissionPercent: 16
-estimatedDirectCommission: 17.58
-
-offerScore: ~62
-priority: high
-```
-
-O JSON também mostra:
-
-```text
+offerScore
+priority
 scoreBreakdown
 scoreVersion
 ```
-
-## WhatsApp
-
-Nada foi alterado no bot.

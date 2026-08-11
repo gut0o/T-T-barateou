@@ -254,25 +254,129 @@ function summarizeProduct(data) {
   const image =
     data.pictures?.[0]?.secure_url ||
     data.pictures?.[0]?.url ||
-    data.pictures?.[0]?.secure_url ||
     data.thumbnail ||
     data.secure_thumbnail ||
-    data.pictures?.[0]?.id
-      ? (
-          data.pictures?.[0]?.secure_url ||
-          data.pictures?.[0]?.url ||
-          data.thumbnail ||
-          data.secure_thumbnail ||
-          ""
-        )
-      : "";
+    "";
+
+  const buyBox = data.buy_box_winner || null;
 
   return {
     id: data.id ?? "",
     title: data.title ?? data.name ?? data.short_description?.content ?? "",
-    price: data.price ?? null,
+    price: data.price ?? buyBox?.price ?? null,
+    originalPrice: data.original_price ?? buyBox?.original_price ?? null,
+    currency: data.currency_id ?? buyBox?.currency_id ?? "BRL",
+    itemId: data.item_id ?? buyBox?.item_id ?? null,
     image
   };
+}
+
+async function resolveCatalogOffer(product, accessToken) {
+  let offer = product?.buy_box_winner || null;
+  let source = offer?.item_id ? "buy_box_winner" : null;
+  let competitionStatus = null;
+
+  // Alguns produtos de catálogo podem retornar buy_box_winner = null.
+  // Nesse caso buscamos as publicações que competem na PDP.
+  if (!offer?.item_id && product?.id) {
+    const competition = await apiRequest(
+      `https://api.mercadolibre.com/products/${product.id}/items`,
+      accessToken
+    );
+
+    competitionStatus = competition.status;
+
+    if (competition.ok && Array.isArray(competition.data?.results)) {
+      const results = competition.data.results;
+
+      // Sem um buy_box_winner explícito, usamos a menor oferta com preço
+      // somente como fallback de exibição.
+      const withPrice = results
+        .filter((item) => typeof item?.price === "number")
+        .sort((a, b) => a.price - b.price);
+
+      offer = withPrice[0] || results[0] || null;
+
+      if (offer) {
+        source = "products_items_fallback";
+      }
+    }
+  }
+
+  if (!offer) {
+    return {
+      itemId: null,
+      price: null,
+      originalPrice: null,
+      currency: "BRL",
+      source: "none",
+      salePriceStatus: null,
+      salePriceError: null,
+      competitionStatus
+    };
+  }
+
+  let price = typeof offer.price === "number" ? offer.price : null;
+  let originalPrice =
+    typeof offer.original_price === "number" ? offer.original_price : null;
+  let currency = offer.currency_id || "BRL";
+  let salePriceStatus = null;
+  let salePriceError = null;
+
+  // Endpoint recomendado atualmente pelo ML para preço de venda.
+  // Pode haver restrição para itens que não pertencem ao usuário autenticado;
+  // por isso mantemos o preço do buy_box_winner como fallback.
+  if (offer.item_id) {
+    const salePrice = await apiRequest(
+      `https://api.mercadolibre.com/items/${offer.item_id}/sale_price?context=channel_marketplace`,
+      accessToken
+    );
+
+    salePriceStatus = salePrice.status;
+
+    if (salePrice.ok) {
+      if (typeof salePrice.data?.amount === "number") {
+        price = salePrice.data.amount;
+      }
+
+      if (typeof salePrice.data?.regular_amount === "number") {
+        originalPrice = salePrice.data.regular_amount;
+      }
+
+      currency = salePrice.data?.currency_id || currency;
+      source = `${source}+sale_price`;
+    } else {
+      salePriceError =
+        salePrice.data?.message ||
+        salePrice.data?.error ||
+        JSON.stringify(salePrice.data).slice(0, 200);
+    }
+  }
+
+  return {
+    itemId: offer.item_id || null,
+    sellerId: offer.seller_id || null,
+    price,
+    originalPrice,
+    currency,
+    source,
+    salePriceStatus,
+    salePriceError,
+    competitionStatus
+  };
+}
+
+function calculateDiscount(price, originalPrice) {
+  if (
+    typeof price !== "number" ||
+    typeof originalPrice !== "number" ||
+    originalPrice <= price ||
+    originalPrice <= 0
+  ) {
+    return null;
+  }
+
+  return Math.round(((originalPrice - price) / originalPrice) * 100);
 }
 
 async function testCandidate(candidate, accessToken) {
@@ -378,12 +482,12 @@ async function findWorkingCandidate(candidates, accessToken) {
   return { winner: null, results };
 }
 
-function formatPrice(value) {
+function formatPrice(value, currency = "BRL") {
   if (typeof value !== "number") return String(value ?? "Não informado");
 
   return value.toLocaleString("pt-BR", {
     style: "currency",
-    currency: "BRL"
+    currency: currency || "BRL"
   });
 }
 
@@ -536,17 +640,96 @@ export default async function handler(req, res) {
           const info = summarizeProduct(tested.winner.data) || {};
           const image = info.image;
 
+          let offer = {
+            itemId: info.itemId || null,
+            price: info.price ?? null,
+            originalPrice: info.originalPrice ?? null,
+            currency: info.currency || "BRL",
+            source: tested.winner.kind,
+            salePriceStatus: null,
+            salePriceError: null
+          };
+
+          if (tested.winner.kind === "product") {
+            offer = await resolveCatalogOffer(
+              tested.winner.data,
+              tokenData.access_token
+            );
+          }
+
+          const discount = calculateDiscount(
+            offer.price,
+            offer.originalPrice
+          );
+
+          const priceHtml =
+            typeof offer.price === "number"
+              ? `<strong>${escapeHtml(formatPrice(offer.price, offer.currency))}</strong>`
+              : "Não informado";
+
+          const originalPriceHtml =
+            typeof offer.originalPrice === "number"
+              ? escapeHtml(formatPrice(offer.originalPrice, offer.currency))
+              : null;
+
+          const messagePreview =
+            typeof offer.price === "number"
+              ? `🔥 *T&T BARATEOU*\n\n🛒 *${info.title || "Produto"}*\n\n` +
+                `${
+                  originalPriceHtml
+                    ? `De: ${formatPrice(offer.originalPrice, offer.currency)}\n`
+                    : ""
+                }` +
+                `💰 *Por: ${formatPrice(offer.price, offer.currency)}*` +
+                `${discount ? `\n🔥 ${discount}% OFF` : ""}` +
+                `\n\n👇 Comprar no Mercado Livre:\n${testLink}`
+              : "";
+
           winnerHtml = `
             <div class="winner">
               <h2>Produto encontrado ✅</h2>
               ${image ? `<img src="${escapeHtml(image)}" alt="Produto">` : ""}
               <p><strong>Tipo:</strong> ${escapeHtml(tested.winner.kind)}</p>
-              <p><strong>ID correto:</strong> ${escapeHtml(tested.winner.candidate.id)}</p>
+              <p><strong>ID do produto:</strong> ${escapeHtml(tested.winner.candidate.id)}</p>
+              ${
+                offer.itemId
+                  ? `<p><strong>Item vencedor/oferta:</strong> ${escapeHtml(offer.itemId)}</p>`
+                  : ""
+              }
               <p><strong>Produto:</strong> ${escapeHtml(info.title || "Título não retornado")}</p>
-              <p><strong>Preço:</strong> ${escapeHtml(formatPrice(info.price))}</p>
+              ${
+                originalPriceHtml
+                  ? `<p><strong>Preço original:</strong> <s>${originalPriceHtml}</s></p>`
+                  : ""
+              }
+              <p><strong>Preço atual:</strong> ${priceHtml}</p>
+              ${
+                discount
+                  ? `<p><strong>Desconto:</strong> 🔥 ${discount}% OFF</p>`
+                  : ""
+              }
+              <p><strong>Fonte do preço:</strong> ${escapeHtml(offer.source || "não identificada")}</p>
+              ${
+                offer.salePriceStatus
+                  ? `<p class="muted">/sale_price: HTTP ${escapeHtml(offer.salePriceStatus)}${
+                      offer.salePriceError
+                        ? ` — ${escapeHtml(offer.salePriceError)}`
+                        : " ✅"
+                    }</p>`
+                  : ""
+              }
               <p><strong>Link afiliado preservado:</strong><br>
                 <code>${escapeHtml(testLink)}</code>
               </p>
+
+              ${
+                messagePreview
+                  ? `
+                    <h3>Prévia da mensagem do futuro bot</h3>
+                    <pre>${escapeHtml(messagePreview)}</pre>
+                  `
+                  : ""
+              }
             </div>
           `;
         } else {

@@ -49,3 +49,19 @@ https://t-t-barateou.vercel.app/api/login?item=MLB2766771378
 ```
 
 Mas o teste recomendado agora é usando `?link=`.
+
+
+## Etapa 4 — preço e oferta vencedora
+
+Quando o candidato encontrado é um produto de catálogo (`/products/{PRODUCT_ID}`),
+o callback agora:
+
+1. lê `buy_box_winner`;
+2. obtém `item_id`, `price`, `original_price` e moeda quando disponíveis;
+3. tenta consultar `/items/{ITEM_ID}/sale_price?context=channel_marketplace`;
+4. se `buy_box_winner` vier vazio, consulta `/products/{PRODUCT_ID}/items` e usa
+   uma oferta com preço como fallback;
+5. calcula o percentual de desconto quando existe preço original;
+6. gera uma prévia da mensagem que mais tarde será enviada ao WhatsApp.
+
+O link de afiliado original continua sendo preservado.

@@ -1,100 +1,94 @@
-# T&T Barateou — Etapa 6.7F
+# T&T Barateou — Etapa 6.7G
 
-Agora ligamos categoria + árvore + comissão ao `/api/offer`.
-
-Fluxo:
+Objetivo:
 
 ```text
-link afiliado
+domainId
 ↓
-produto
-↓
-preço / imagem
+API oficial de domínios do Mercado Livre
 ↓
 categoryId
 ↓
-árvore salva no Blob
+árvore salva
 ↓
 categoria principal
 ↓
 comissão
 ```
 
-## Arquivos
-
-Substitua:
+Nesta etapa NÃO alteramos:
 
 ```text
 api/offer.js
+WhatsApp
 ```
 
-Adicione:
+Primeiro validamos o conversor isoladamente.
+
+## Arquivos novos
+
+Copie:
 
 ```text
-lib/ml-offer-category-enrichment.js
+lib/ml-domain-category.js
+api/domain-category.js
 ```
-
-Os arquivos das etapas anteriores continuam necessários:
-
-```text
-lib/ml-categories-store.js
-lib/ml-affiliate-commissions.js
-```
-
-## Importante
-
-Nesta etapa NÃO alteramos o WhatsApp.
-
-Produtos que ainda retornam somente `domainId` continuam
-funcionando. Para eles a comissão fica desconhecida por enquanto.
-
-Isso evita inventar uma comissão.
 
 ## Deploy
 
 ```powershell
 git add .
-git commit -m "Integra categoria e comissao ao endpoint de oferta"
+git commit -m "Adiciona conversao de dominio para categoria"
 git push
 ```
 
-## Primeiro teste — vestido
+## Primeiro teste — ar-condicionado
 
 Abra:
 
 ```text
-https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F1wpNZf4
+https://t-t-barateou.vercel.app/api/domain-category?domainId=MLB-AIR_CONDITIONERS
 ```
 
-Além dos dados que já existiam, esperamos:
-
-```json
-{
-  "categoryId": "MLB108704",
-  "categoryName": "Vestidos",
-  "rootCategory": {
-    "id": "MLB1430",
-    "name": "Calçados, Roupas e Bolsas"
-  },
-  "commissionKnown": true,
-  "directCommissionPercent": 16,
-  "indirectCommissionPercent": 8,
-  "categoryEnrichmentSource": "vercel_blob_saved_tree"
-}
-```
-
-## Depois
-
-Quando este teste passar, testamos ar-condicionado e creatina.
-
-Por enquanto eles podem retornar:
+Se o domínio tiver apenas uma categoria oficial, esperamos:
 
 ```text
-commissionKnown: false
+resolved: true
+resolutionType: single_domain_category
+selectedCategory: ...
 ```
 
-porque nos testes anteriores vieram com `domainId`, mas sem
-`categoryId`.
+E dentro de `selectedCategory` queremos encontrar:
 
-A etapa seguinte poderá resolver também esses produtos por
-`domainId`, sem quebrar o que já funciona.
+```text
+rootCategory
+commissionKnown
+directCommissionPercent
+indirectCommissionPercent
+```
+
+## Segundo teste — suplementos
+
+Depois testaremos:
+
+```text
+https://t-t-barateou.vercel.app/api/domain-category?domainId=MLB-SUPPLEMENTS
+```
+
+## Segurança contra classificação errada
+
+Se um domínio apontar para várias categorias, o sistema NÃO escolhe
+uma aleatoriamente.
+
+Nesse caso ele retorna os candidatos.
+
+Opcionalmente podemos passar também o título:
+
+```text
+/api/domain-category?domainId=...&title=...
+```
+
+e então ele usa o preditor oficial do Mercado Livre para tentar
+escolher apenas entre as categorias daquele domínio.
+
+Só depois de validarmos essa etapa vamos integrar ao `/api/offer`.

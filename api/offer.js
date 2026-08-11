@@ -1,5 +1,9 @@
 import { getValidMlTokenData } from "../lib/ml-token-store.js";
 
+import {
+  enrichOfferCategoryAndCommission
+} from "../lib/ml-offer-category-enrichment.js";
+
 const USER_AGENTS = {
   desktop:
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -1962,6 +1966,23 @@ export default async function handler(req, res) {
         );
     }
 
+    // Etapa 6.7F:
+    // usa a árvore já salva no Blob para descobrir
+    // a categoria principal e, quando mapeada,
+    // a comissão de afiliado.
+    //
+    // Importante: falha nesta camada NÃO deve impedir
+    // a oferta principal de continuar funcionando.
+    const categoryEnrichment =
+      await enrichOfferCategoryAndCommission({
+        categoryId:
+          offer.categoryId || null,
+        categoryName:
+          offer.categoryName || null,
+        domainId:
+          offer.domainId || null
+      });
+
     if (!offer.image) {
       return res.status(502).json({
         ok: false,
@@ -2014,6 +2035,32 @@ export default async function handler(req, res) {
         offer.categoryName || null,
       domainId:
         offer.domainId || null,
+
+      // Etapa 6.7F:
+      // classificação principal + comissão.
+      rootCategory:
+        categoryEnrichment.rootCategory,
+
+      categoryPath:
+        categoryEnrichment.categoryPath,
+
+      categoryDepth:
+        categoryEnrichment.categoryDepth,
+
+      commissionKnown:
+        categoryEnrichment.commissionKnown,
+
+      directCommissionPercent:
+        categoryEnrichment.directCommissionPercent,
+
+      indirectCommissionPercent:
+        categoryEnrichment.indirectCommissionPercent,
+
+      categoryEnrichmentSource:
+        categoryEnrichment.source,
+
+      categoryEnrichmentNote:
+        categoryEnrichment.note,
 
       accessTokenExposed: false,
       refreshTokenExposed: false

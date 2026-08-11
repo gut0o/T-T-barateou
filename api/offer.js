@@ -1980,7 +1980,11 @@ export default async function handler(req, res) {
         categoryName:
           offer.categoryName || null,
         domainId:
-          offer.domainId || null
+          offer.domainId || null,
+        title:
+          offer.title || null,
+        accessToken:
+          tokenData.access_token
       });
 
     if (!offer.image) {
@@ -2061,6 +2065,18 @@ export default async function handler(req, res) {
 
       categoryEnrichmentNote:
         categoryEnrichment.note,
+
+      domainCategoryResolutionType:
+        categoryEnrichment.domainCategoryResolutionType,
+
+      domainCategoryCandidateCount:
+        categoryEnrichment.domainCategoryCandidateCount,
+
+      resolvedCategoryId:
+        categoryEnrichment.categoryId,
+
+      resolvedCategoryName:
+        categoryEnrichment.categoryName,
 
       accessTokenExposed: false,
       refreshTokenExposed: false

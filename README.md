@@ -1,94 +1,102 @@
-# T&T Barateou — Etapa 6.7G
+# T&T Barateou — Etapa 6.7H
 
-Objetivo:
+Agora o `/api/offer` resolve automaticamente produtos que vierem
+com `domainId`, mas sem `categoryId`.
+
+Fluxo:
 
 ```text
-domainId
+link
 ↓
-API oficial de domínios do Mercado Livre
+produto
 ↓
-categoryId
-↓
-árvore salva
-↓
-categoria principal
-↓
-comissão
+categoryId existe?
+├─ sim → árvore salva
+└─ não
+   ↓
+   domainId + título
+   ↓
+   API oficial de domínio do Mercado Livre
+   ↓
+   categoria segura
+   ↓
+   árvore salva
+   ↓
+   categoria principal
+   ↓
+   comissão
 ```
 
-Nesta etapa NÃO alteramos:
+## Arquivos
+
+Substitua:
 
 ```text
 api/offer.js
-WhatsApp
+lib/ml-offer-category-enrichment.js
 ```
 
-Primeiro validamos o conversor isoladamente.
-
-## Arquivos novos
-
-Copie:
+A Etapa 6.7G precisa continuar no projeto:
 
 ```text
 lib/ml-domain-category.js
-api/domain-category.js
 ```
 
 ## Deploy
 
 ```powershell
 git add .
-git commit -m "Adiciona conversao de dominio para categoria"
+git commit -m "Integra resolucao por dominio nas ofertas"
 git push
 ```
 
 ## Primeiro teste — ar-condicionado
 
-Abra:
-
 ```text
-https://t-t-barateou.vercel.app/api/domain-category?domainId=MLB-AIR_CONDITIONERS
+https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F2RzSExj
 ```
 
-Se o domínio tiver apenas uma categoria oficial, esperamos:
+Esperamos algo parecido com:
 
-```text
-resolved: true
-resolutionType: single_domain_category
-selectedCategory: ...
+```json
+{
+  "domainId": "MLB-AIR_CONDITIONERS",
+  "rootCategory": {
+    "name": "Eletrodomésticos"
+  },
+  "commissionKnown": true,
+  "directCommissionPercent": 5,
+  "indirectCommissionPercent": 2.5,
+  "categoryEnrichmentSource": "domain_resolver_plus_vercel_blob_saved_tree",
+  "domainCategoryResolutionType": "single_domain_category",
+  "resolvedCategoryId": "MLB1646"
+}
 ```
 
-E dentro de `selectedCategory` queremos encontrar:
-
-```text
-rootCategory
-commissionKnown
-directCommissionPercent
-indirectCommissionPercent
-```
-
-## Segundo teste — suplementos
+## Segundo teste — creatina
 
 Depois testaremos:
 
 ```text
-https://t-t-barateou.vercel.app/api/domain-category?domainId=MLB-SUPPLEMENTS
+https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F2EMjkct
 ```
 
-## Segurança contra classificação errada
-
-Se um domínio apontar para várias categorias, o sistema NÃO escolhe
-uma aleatoriamente.
-
-Nesse caso ele retorna os candidatos.
-
-Opcionalmente podemos passar também o título:
+Esperamos que o título ajude o Mercado Livre a escolher:
 
 ```text
-/api/domain-category?domainId=...&title=...
+Suplementos Alimentares
+→ Saúde
 ```
 
-e então ele usa o preditor oficial do Mercado Livre para tentar
-escolher apenas entre as categorias daquele domínio.
+Como `Saúde` ainda não está na tabela de comissão fornecida,
+esperamos:
 
-Só depois de validarmos essa etapa vamos integrar ao `/api/offer`.
+```text
+commissionKnown: false
+```
+
+Isso é correto e proposital.
+
+## WhatsApp
+
+Ainda não alteramos nada no bot.

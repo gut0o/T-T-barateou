@@ -65,3 +65,81 @@ o callback agora:
 6. gera uma prévia da mensagem que mais tarde será enviada ao WhatsApp.
 
 O link de afiliado original continua sendo preservado.
+
+
+# Etapa 5 — tokens persistentes e refresh automático
+
+Nesta etapa o OAuth deixa de existir apenas durante uma requisição.
+
+## Armazenamento
+
+Os tokens são:
+
+1. criptografados no backend usando AES-256-GCM;
+2. gravados em um Vercel Blob **privado**;
+3. salvos em arquivos imutáveis versionados;
+4. nunca exibidos nas páginas de resposta.
+
+Isso é importante porque o Mercado Livre devolve um novo `refresh_token` a
+cada renovação, e somente o último refresh token pode continuar sendo usado.
+
+## Configuração no Vercel
+
+### 1. Criar Blob privado
+
+No projeto:
+
+`Storage → Create Database → Blob → Private`
+
+Conecte o Blob ao projeto. O Vercel adicionará automaticamente:
+
+`BLOB_READ_WRITE_TOKEN`
+
+### 2. Criar chave de criptografia
+
+No seu terminal local:
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+Copie a saída.
+
+No Vercel, crie uma variável **Sensitive**:
+
+```text
+ML_TOKEN_ENCRYPTION_KEY=COLE_A_CHAVE_AQUI
+```
+
+Não salve essa chave no GitHub.
+
+### 3. Redeploy
+
+Depois que o Blob e a variável estiverem configurados, faça um redeploy.
+
+### 4. Fazer OAuth uma vez novamente
+
+Abra, por exemplo:
+
+```text
+https://t-t-barateou.vercel.app/api/login?link=https%3A%2F%2Fmeli.la%2F2EMjkct
+```
+
+Ao concluir, a tela deve mostrar:
+
+`Tokens persistidos com segurança ✅`
+
+### 5. Testar persistência
+
+Sem fazer login novamente, abra:
+
+```text
+https://t-t-barateou.vercel.app/api/ml-status
+```
+
+A rota NÃO mostra access token nem refresh token. Ela mostra apenas metadata
+como usuário, expiração e se a renovação automática está pronta.
+
+A futura integração com WhatsApp poderá chamar `getValidMlTokenData()`.
+Se o access token estiver próximo de expirar, o helper troca o refresh token
+por um novo par de tokens e salva a nova versão automaticamente.

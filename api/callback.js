@@ -1,3 +1,5 @@
+import { saveMlTokenData } from "../lib/ml-token-store.js";
+
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36";
@@ -611,6 +613,13 @@ export default async function handler(req, res) {
       `);
     }
 
+    // ETAPA 5: guarda access_token + refresh_token criptografados
+    // em um Vercel Blob privado. Cada renovação gera uma nova versão.
+    const storedToken = await saveMlTokenData(
+      tokenData,
+      "authorization_code"
+    );
+
     const usuarioResult = await apiRequest(
       "https://api.mercadolibre.com/users/me",
       tokenData.access_token
@@ -860,7 +869,17 @@ export default async function handler(req, res) {
             <h2 class="ok">Mercado Livre conectado ✅</h2>
             <p><strong>User ID:</strong> ${escapeHtml(usuario.id)}</p>
             <p><strong>Nickname:</strong> ${escapeHtml(usuario.nickname || "")}</p>
-            <p>O access token não é exibido nem salvo nesta etapa.</p>
+            <p>O access token não é exibido na tela.</p>
+            <p class="ok"><strong>Tokens persistidos com segurança ✅</strong></p>
+            <p class="muted">
+              Access token e refresh token foram criptografados antes de serem
+              gravados no Vercel Blob privado.
+            </p>
+            <p class="muted">
+              Expira em aproximadamente
+              ${escapeHtml(Math.max(0, Math.floor(storedToken.remainingSeconds / 60)))}
+              minutos. Depois disso, o backend poderá renovar automaticamente.
+            </p>
             ${diagnosticHtml}
           </div>
         </body>

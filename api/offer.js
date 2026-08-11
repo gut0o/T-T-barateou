@@ -4,6 +4,10 @@ import {
   enrichOfferCategoryAndCommission
 } from "../lib/ml-offer-category-enrichment.js";
 
+import {
+  calculateOfferScore
+} from "../lib/offer-scoring.js";
+
 const USER_AGENTS = {
   desktop:
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -2023,6 +2027,19 @@ export default async function handler(req, res) {
           .indirectCommissionPercent
       );
 
+    const offerScoring =
+      calculateOfferScore({
+        discount:
+          discountPercent(
+            offer.price,
+            offer.originalPrice
+          ),
+        directCommissionPercent:
+          categoryEnrichment
+            .directCommissionPercent,
+        estimatedDirectCommission
+      });
+
     if (!offer.image) {
       return res.status(502).json({
         ok: false,
@@ -2108,6 +2125,20 @@ export default async function handler(req, res) {
       estimatedDirectCommission,
 
       estimatedIndirectCommission,
+
+      // Etapa 6.7J:
+      // pontuação somente para uso interno do T&T.
+      offerScore:
+        offerScoring.offerScore,
+
+      priority:
+        offerScoring.priority,
+
+      scoreBreakdown:
+        offerScoring.scoreBreakdown,
+
+      scoreVersion:
+        offerScoring.scoreVersion,
 
       categoryEnrichmentSource:
         categoryEnrichment.source,

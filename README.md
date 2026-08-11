@@ -1,41 +1,55 @@
-# T&T Barateou — Etapa 6.7I
+# T&T Barateou — Etapa 6.7J
 
-Esta etapa FECHA a primeira versão da camada de comissão.
-
-## O que mudou
-
-A tabela agora usa os IDs das categorias principais do Mercado Livre,
-não apenas o nome textual.
-
-Também adicionamos:
+Objetivo:
 
 ```text
-commissionGroup
-commissionTableVersion
-commissionSource
-estimatedDirectCommission
-estimatedIndirectCommission
+oferta
+↓
+desconto
++ comissão
++ ganho estimado
+↓
+pontuação interna
+↓
+prioridade
 ```
 
-## Segurança da regra
+## Importante
 
-Só cadastramos percentuais confirmados na tabela fornecida:
+A pontuação NÃO aparece no anúncio do WhatsApp.
+
+Ela serve apenas para o sistema decidir quais ofertas
+merecem prioridade no futuro.
+
+## Escala
 
 ```text
-16% / 8%
-12% / 6%
-5% / 2,5%
+0 a 100
 ```
 
-Categorias sem percentual confirmado continuam:
+A primeira regra é:
 
 ```text
-commissionKnown: false
+Desconto ................ até 40 pontos
+Comissão direta ......... até 30 pontos
+Ganho direto estimado ... até 30 pontos
 ```
 
-Isso inclui `Saúde` nesta versão.
+Prioridade:
 
-Não inventamos comissão.
+```text
+60–100 = high
+35–59  = medium
+0–34   = low
+```
+
+Essa regra é apenas a versão inicial:
+
+```text
+scoreVersion: TT-1.0
+```
+
+Depois podemos ajustar com dados reais.
 
 ## Arquivos
 
@@ -43,63 +57,46 @@ Substitua:
 
 ```text
 api/offer.js
-lib/ml-offer-category-enrichment.js
-lib/ml-affiliate-commissions.js
+```
+
+Adicione:
+
+```text
+lib/offer-scoring.js
 ```
 
 ## Deploy
 
 ```powershell
 git add .
-git commit -m "Fecha camada de comissao das ofertas"
+git commit -m "Adiciona pontuacao interna das ofertas"
 git push
 ```
 
-## Teste 1 — vestido
+## Primeiro teste — vestido
 
 ```text
 https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F1wpNZf4
 ```
 
-Com preço de R$ 109,90 e comissão direta de 16% esperamos:
+Com os dados atuais do vestido esperamos aproximadamente:
 
 ```text
+discount: 27
+directCommissionPercent: 16
 estimatedDirectCommission: 17.58
-estimatedIndirectCommission: 8.79
+
+offerScore: ~62
+priority: high
 ```
 
-## Teste 2 — ar-condicionado
+O JSON também mostra:
 
 ```text
-https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F2RzSExj
+scoreBreakdown
+scoreVersion
 ```
 
-Com R$ 2.699 e 5% direta:
+## WhatsApp
 
-```text
-estimatedDirectCommission: 134.95
-estimatedIndirectCommission: 67.48
-```
-
-## Teste 3 — creatina
-
-```text
-https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F2EMjkct
-```
-
-Como a categoria resolvida é Saúde e ainda não há percentual
-confirmado na tabela:
-
-```text
-commissionKnown: false
-estimatedDirectCommission: null
-estimatedIndirectCommission: null
-```
-
-## Importante
-
-Esses valores são estimativas com base no preço atual do produto e
-na taxa padrão cadastrada. Não representam garantia de pagamento,
-pois a venda ainda precisa ser atribuída e validada pelo programa.
-
-O WhatsApp continua inalterado nesta etapa.
+Nada foi alterado no bot.

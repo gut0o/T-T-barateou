@@ -1,84 +1,31 @@
-# T&T Ofertas — Etapa 1
+# T&T Barateou — OAuth Etapa 2
 
-Nesta etapa o projeto faz somente isto:
+Copie os arquivos `login.js` e `callback.js` para a pasta `api/` do projeto.
 
-1. recebe um link do Mercado Livre (inclusive link curto/de afiliado);
-2. segue os redirecionamentos via HTTP;
-3. tenta descobrir o ID `MLB...` do anúncio;
-4. consulta a API de itens do Mercado Livre;
-5. mostra nome, preço e imagem;
-6. salva os dados em `resultado.json`.
+## Variáveis no Vercel
 
-**Não existe bot de WhatsApp nesta versão.**
-**Não existe automação de navegador.**
-**Não existe login na sua conta do Mercado Livre nesta versão.**
+Em **Settings → Environment Variables**, crie:
 
-## Requisito
+- `ML_CLIENT_ID`
+- `ML_CLIENT_SECRET`
+- `ML_REDIRECT_URI`
 
-Node.js 18 ou superior.
+Use esta Redirect URI:
 
-Confira:
+`https://t-t-barateou.vercel.app/api/callback`
 
-```bash
-node --version
-```
+Não coloque o Client Secret no GitHub.
 
-## Como testar
+## Teste
 
-Abra esta pasta no VS Code.
+Depois do deploy, abra:
 
-No terminal:
+`https://t-t-barateou.vercel.app/api/login`
 
-```bash
-npm start
-```
+Para testar também o item que antes deu 403:
 
-Vai aparecer:
+`https://t-t-barateou.vercel.app/api/login?item=MLB2766771378`
 
-```text
-Cole o link do produto/afiliado do Mercado Livre:
->
-```
+O fluxo autentica sua conta, testa `/users/me` e, se houver `item`, consulta `/items/{ID}` com o access token.
 
-Cole um dos seus links e pressione Enter.
-
-Também dá para passar o link diretamente:
-
-```bash
-node index.js "https://mercadolivre.com/sec/SEU_LINK"
-```
-
-## Resultado esperado
-
-Algo parecido com:
-
-```text
-Produto : Nome do produto
-ID      : MLB1234567890
-Preço   : R$ 199,90
-Imagem  : https://...
-Afiliado: https://mercadolivre.com/sec/...
-
-✅ Também salvei tudo em resultado.json
-```
-
-## Importante
-
-Links de afiliado podem usar diferentes formatos e redirecionamentos.
-Esta primeira versão tenta identificar o `MLB` tanto pela URL final quanto pelo
-HTML retornado pelo Mercado Livre.
-
-Se um link seu não funcionar, copie para o ChatGPT:
-
-- o link que você testou;
-- a saída completa do terminal.
-
-A próxima correção será feita usando esse caso real.
-
-## Access token (opcional)
-
-O código já suporta a variável de ambiente `ML_ACCESS_TOKEN`, mas você NÃO
-precisa configurar isso agora.
-
-Depois vamos conectar sua conta de forma correta via OAuth, sem colocar sua
-senha no código.
+Os tokens não são exibidos nem persistidos nesta etapa.

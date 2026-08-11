@@ -8,6 +8,10 @@ import {
   calculateOfferScore
 } from "../lib/offer-scoring.js";
 
+import {
+  routeToTtCategory
+} from "../lib/tt-category-routing.js";
+
 const USER_AGENTS = {
   desktop:
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -2040,6 +2044,13 @@ export default async function handler(req, res) {
         estimatedDirectCommission
       });
 
+    const ttRouting =
+      routeToTtCategory({
+        rootCategory:
+          categoryEnrichment
+            .rootCategory
+      });
+
     if (!offer.image) {
       return res.status(502).json({
         ok: false,
@@ -2139,6 +2150,26 @@ export default async function handler(req, res) {
 
       scoreVersion:
         offerScoring.scoreVersion,
+
+      // Etapa 6.7K:
+      // roteamento interno para as categorias T&T.
+      ttCategoryId:
+        ttRouting.ttCategoryId,
+
+      ttCategoryName:
+        ttRouting.ttCategoryName,
+
+      ttCategoryEmoji:
+        ttRouting.ttCategoryEmoji,
+
+      ttRoutingKnown:
+        ttRouting.ttRoutingKnown,
+
+      ttRoutingSource:
+        ttRouting.ttRoutingSource,
+
+      ttRoutingVersion:
+        ttRouting.ttRoutingVersion,
 
       categoryEnrichmentSource:
         categoryEnrichment.source,

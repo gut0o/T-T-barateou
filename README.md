@@ -1,30 +1,37 @@
-# T&T Barateou — Etapa 6.5D
+# T&T Barateou — Etapa 6.5E
 
-Esta versão mantém toda a lógica anterior e acrescenta
-um fallback para anúncios que existem publicamente, mas
-não ficam acessíveis no endpoint `/items/{id}` da API.
+Esta versão melhora o fallback dos links `/social/`.
 
-## Como funciona
+O diagnóstico do link:
 
 ```text
-meli.la
-  ↓
-página social
-  ↓
-URL interna do anúncio
-  ↓
-tenta API /items/{id}
-  ↓
-se bloquear:
-  ↓
-abre a página pública do anúncio
-  ↓
-JSON-LD / Open Graph
-  ↓
-nome + imagem + preço
+https://meli.la/1wpNZf4
 ```
 
-O link afiliado original continua preservado.
+mostrou:
+
+```text
+ogTitle:
+Vestido Longo Tecido Crepinho C/forro Lastex Moda Evangélica
+
+item:
+MLB3976572103
+```
+
+A versão nova do `api/offer.js` mantém em memória as páginas
+desktop/mobile usadas para resolver o link e, se a API/página
+direta do anúncio não entregar tudo, tenta aproveitar os dados
+da própria página social.
+
+Ela procura, perto do ID correto do anúncio:
+
+- `price`;
+- `current_price`;
+- `sale_price`;
+- preço anterior;
+- estruturas `fraction` + `cents`.
+
+Também usa `og:title` e `og:image` como fallback.
 
 ## Copiar
 
@@ -40,27 +47,24 @@ pelo arquivo deste ZIP.
 
 ```powershell
 git add .
-git commit -m "Adiciona fallback para pagina publica do produto"
+git commit -m "Melhora fallback de links sociais e precos"
 git push
 ```
 
-## Testar
+## Teste
 
 Depois do deploy:
 
 ```text
-https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F1B9vyix
+https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F1wpNZf4
 ```
 
-Esperamos agora:
+Ainda NÃO alteramos o WhatsApp.
 
-```text
-ok: true
-title: Tênis Masculino Feminino Kappa Park 2.0 Original
-itemId: MLB4049279695
-image: https://...
-price: ...
-priceSource: mercadolivre_public_page
+Se retornar `ok:true`, execute novamente:
+
+```powershell
+node whatsapp/send-offer.js
 ```
 
-Ainda não há alteração no WhatsApp.
+e confira a prévia antes de responder `S`.

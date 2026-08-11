@@ -438,6 +438,391 @@ function collectCandidates(html, finalUrl) {
   );
 }
 
+
+function normalizeJsonishText(value) {
+  return decodeHtmlEntities(value)
+    .replaceAll('\\"', '"')
+    .replaceAll("\\\\/", "/");
+}
+
+function pageMeta(html, property, name) {
+  const normalized = normalizeJsonishText(html);
+  const escapedProperty = String(property).replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+  const escapedName = String(name).replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+
+  const patterns = [
+    new RegExp(
+      `<meta[^>]+${escapedProperty}=["']${escapedName}["'][^>]+content=["']([^"']+)["']`,
+      "i"
+    ),
+    new RegExp(
+      `<meta[^>]+content=["']([^"']+)["'][^>]+${escapedProperty}=["']${escapedName}["']`,
+      "i"
+    )
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+
+    if (match?.[1]) {
+      return decodeHtmlEntities(match[1]);
+    }
+  }
+
+  return null;
+}
+
+function moneyFromObjectText(block) {
+  if (!block) {
+    return null;
+  }
+
+  const valueMatch = block.match(
+    /"(?:value|amount)"\s*:\s*"?(\d+(?:[.,]\d+)?)"?/i
+  );
+
+  if (valueMatch?.[1]) {
+    return parseNumber(valueMatch[1]);
+  }
+
+  const fractionMatch = block.match(
+    /"fraction"\s*:\s*"?(\d+)"?/i
+  );
+
+  if (!fractionMatch?.[1]) {
+    return null;
+  }
+
+  const fraction = Number(fractionMatch[1]);
+
+  const centsMatch = block.match(
+    /"cents"\s*:\s*"?(\d{1,2})"?/i
+  );
+
+  const cents = centsMatch?.[1]
+    ? Number(String(centsMatch[1]).padEnd(2, "0"))
+    : 0;
+
+  if (!Number.isFinite(fraction) || !Number.isFinite(cents)) {
+    return null;
+  }
+
+  return fraction + cents / 100;
+}
+
+function moneyNearKey(text, keys) {
+  for (const key of keys) {
+    const escapedKey = String(key).replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+
+    // Objeto de preço, por exemplo:
+    // "price":{"fraction":93,"cents":12,...}
+    const objectPattern = new RegExp(
+      `"${escapedKey}"\\s*:\\s*\\{([\\s\\S]{0,1800})`,
+      "i"
+    );
+
+    const objectMatch = text.match(objectPattern);
+
+    if (objectMatch?.[1]) {
+      const value = moneyFromObjectText(
+        objectMatch[1]
+      );
+
+      if (typeof value === "number") {
+        return value;
+      }
+    }
+
+    // Número simples:
+    // "price":93.12
+    const numberPattern = new RegExp(
+      `"${escapedKey}"\\s*:\\s*"?([0-9]+(?:[.,][0-9]+)?)"?`,
+      "i"
+    );
+
+    const numberMatch = text.match(numberPattern);
+
+    if (numberMatch?.[1]) {
+      const value = parseNumber(
+        numberMatch[1]
+      );
+
+      if (typeof value === "number") {
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
+function priceNearItem(html, itemId) {
+  const normalized = normalizeJsonishText(html);
+  const normalizedItem = normalizeMlb(itemId);
+
+  if (!normalizedItem) {
+    return {
+      price: null,
+      originalPrice: null
+    };
+  }
+
+  const withDash = normalizedItem.replace(
+    /^MLB/,
+    "MLB-"
+  );
+
+  const anchors = [
+    `"id":"${normalizedItem}"`,
+    `"item_id":"${normalizedItem}"`,
+    `"itemId":"${normalizedItem}"`,
+    normalizedItem,
+    withDash
+  ];
+
+  let index = -1;
+
+  for (const anchor of anchors) {
+    index = normalized.indexOf(anchor);
+
+    if (index >= 0) {
+      break;
+    }
+  }
+
+  if (index < 0) {
+    return {
+      price: null,
+      originalPrice: null
+    };
+  }
+
+  // O preço do polycard normalmente aparece perto do metadata.id.
+  // Mantemos uma janela limitada para não capturar outro produto.
+  const start = Math.max(0, index - 5000);
+  const end = Math.min(
+    normalized.length,
+    index + 30000
+  );
+
+  const window = normalized.slice(
+    start,
+    end
+  );
+
+  const price = moneyNearKey(
+    window,
+    [
+      "price",
+      "current_price",
+      "currentPrice",
+      "sale_price",
+      "salePrice"
+    ]
+  );
+
+  const originalPrice = moneyNearKey(
+    window,
+    [
+      "original_price",
+      "originalPrice",
+      "previous_price",
+      "previousPrice",
+      "regular_price",
+      "regularPrice"
+    ]
+  );
+
+  return {
+    price,
+    originalPrice
+  };
+}
+
+function socialFallbackForItem(pages, itemId) {
+  const normalizedItem = normalizeMlb(itemId);
+
+  if (!normalizedItem) {
+    return null;
+  }
+
+  let best = null;
+
+  for (const page of pages || []) {
+    if (!page?.html) {
+      continue;
+    }
+
+    const normalized =
+      normalizeJsonishText(page.html);
+
+    const withDash =
+      normalizedItem.replace(
+        /^MLB/,
+        "MLB-"
+      );
+
+    if (
+      !normalized.includes(normalizedItem) &&
+      !normalized.includes(withDash)
+    ) {
+      continue;
+    }
+
+    const title =
+      pageMeta(
+        page.html,
+        "property",
+        "og:title"
+      ) ||
+      pageMeta(
+        page.html,
+        "name",
+        "twitter:title"
+      );
+
+    const image =
+      pageMeta(
+        page.html,
+        "property",
+        "og:image"
+      ) ||
+      pageMeta(
+        page.html,
+        "name",
+        "twitter:image"
+      );
+
+    const prices =
+      priceNearItem(
+        page.html,
+        normalizedItem
+      );
+
+    const directUrl =
+      (() => {
+        const variants =
+          expandNestedEncodedUrls(
+            page.html
+          );
+
+        for (const source of variants) {
+          const match = source.match(
+            new RegExp(
+              `https?:\\\\/\\\\/(?:produto\\\\.)?mercadolivre\\\\.com\\\\.br\\\\/MLB-?${normalizedItem.replace(
+                /^MLB/,
+                ""
+              )}[^"'<>\\\\\\\\\\\\s]*`,
+              "i"
+            )
+          );
+
+          if (match?.[0]) {
+            return match[0];
+          }
+        }
+
+        return null;
+      })();
+
+    const score =
+      (title ? 2 : 0) +
+      (image ? 2 : 0) +
+      (
+        typeof prices.price === "number"
+          ? 3
+          : 0
+      ) +
+      (directUrl ? 2 : 0);
+
+    const candidate = {
+      title,
+      image,
+      price: prices.price,
+      originalPrice:
+        prices.originalPrice,
+      directUrl,
+      score
+    };
+
+    if (
+      !best ||
+      candidate.score > best.score
+    ) {
+      best = candidate;
+    }
+  }
+
+  return best;
+}
+
+function priceFromPublicProductPage(html) {
+  const normalized =
+    normalizeJsonishText(html);
+
+  // 1. JSON-LD / meta já tratados em testItemPageFallback.
+  // 2. Estruturas internas comuns do Mercado Livre.
+  const value =
+    moneyNearKey(
+      normalized,
+      [
+        "price",
+        "current_price",
+        "currentPrice",
+        "sale_price",
+        "salePrice"
+      ]
+    );
+
+  if (typeof value === "number") {
+    return value;
+  }
+
+  // 3. HTML visual do componente andes-money-amount.
+  const fractionMatch =
+    normalized.match(
+      /andes-money-amount__fraction[^>]*>\s*([0-9.]+)\s*</i
+    );
+
+  if (fractionMatch?.[1]) {
+    const fraction = Number(
+      fractionMatch[1].replaceAll(".", "")
+    );
+
+    const centsMatch =
+      normalized.match(
+        /andes-money-amount__cents[^>]*>\s*(\d{1,2})\s*</i
+      );
+
+    const cents =
+      centsMatch?.[1]
+        ? Number(
+            String(
+              centsMatch[1]
+            ).padEnd(2, "0")
+          )
+        : 0;
+
+    if (
+      Number.isFinite(fraction) &&
+      Number.isFinite(cents)
+    ) {
+      return fraction + cents / 100;
+    }
+  }
+
+  return null;
+}
+
 async function fetchResolvedPage(url, userAgent) {
   const response = await fetch(url, {
     method: "GET",
@@ -501,6 +886,14 @@ async function resolveAffiliateLink(link) {
     USER_AGENTS.desktop
   );
 
+  const pages = [
+    {
+      kind: "desktop",
+      finalUrl: desktop.finalUrl,
+      html: desktop.html
+    }
+  ];
+
   const mergedCandidates = new Map();
 
   function mergeCandidates(list) {
@@ -508,11 +901,15 @@ async function resolveAffiliateLink(link) {
       const key = `${candidate.type}:${candidate.id}`;
 
       if (!mergedCandidates.has(key)) {
-        mergedCandidates.set(key, candidate);
+        mergedCandidates.set(
+          key,
+          candidate
+        );
         continue;
       }
 
-      const existing = mergedCandidates.get(key);
+      const existing =
+        mergedCandidates.get(key);
 
       existing.score = Math.max(
         existing.score,
@@ -531,7 +928,7 @@ async function resolveAffiliateLink(link) {
           ...(existing.evidence || []),
           ...(candidate.evidence || [])
         ])
-      ].slice(0, 3);
+      ].slice(0, 4);
     }
   }
 
@@ -542,16 +939,19 @@ async function resolveAffiliateLink(link) {
     )
   );
 
-  // No perfil social do Mercado Livre alguns links internos
-  // de produto são renderizados apenas para user-agent mobile.
-  if (
-    /\/social\//i.test(desktop.finalUrl)
-  ) {
+  if (/\/social\//i.test(desktop.finalUrl)) {
     try {
-      const mobile = await fetchResolvedPage(
-        desktop.finalUrl,
-        USER_AGENTS.mobile
-      );
+      const mobile =
+        await fetchResolvedPage(
+          desktop.finalUrl,
+          USER_AGENTS.mobile
+        );
+
+      pages.push({
+        kind: "mobile",
+        finalUrl: mobile.finalUrl,
+        html: mobile.html
+      });
 
       mergeCandidates(
         collectCandidates(
@@ -560,14 +960,15 @@ async function resolveAffiliateLink(link) {
         )
       );
     } catch {
-      // Desktop continua como fallback.
+      // Desktop permanece disponível.
     }
   }
 
   const candidates =
-    [...mergedCandidates.values()].sort(
-      (a, b) => b.score - a.score
-    );
+    [...mergedCandidates.values()]
+      .sort(
+        (a, b) => b.score - a.score
+      );
 
   if (!candidates.length) {
     throw new Error(
@@ -577,7 +978,8 @@ async function resolveAffiliateLink(link) {
 
   return {
     finalUrl: desktop.finalUrl,
-    candidates
+    candidates,
+    pages
   };
 }
 
@@ -1018,73 +1420,114 @@ function directMercadoLivreUrl(candidate) {
   return null;
 }
 
-async function testItemPageFallback(candidate) {
+async function testItemPageFallback(
+  candidate,
+  pages = []
+) {
+  const social =
+    socialFallbackForItem(
+      pages,
+      candidate.id
+    );
+
   const directUrl =
-    directMercadoLivreUrl(candidate);
+    directMercadoLivreUrl(candidate) ||
+    social?.directUrl ||
+    null;
 
-  if (!directUrl) {
-    return null;
+  let page = null;
+
+  if (directUrl) {
+    page =
+      await fetchPublicProductPage(
+        directUrl
+      );
   }
 
-  const page =
-    await fetchPublicProductPage(directUrl);
+  let product = null;
+  let jsonOffer = {
+    price: null,
+    currency: null
+  };
 
-  if (!page) {
-    return null;
+  let pageTitle = null;
+  let pageImage = null;
+  let pagePrice = null;
+
+  if (page?.html) {
+    product =
+      findJsonLdProduct(
+        page.html
+      );
+
+    jsonOffer =
+      offerFromJsonLd(product);
+
+    pageTitle =
+      product?.name ||
+      metaContent(
+        page.html,
+        "property",
+        "og:title"
+      ) ||
+      metaContent(
+        page.html,
+        "name",
+        "twitter:title"
+      ) ||
+      null;
+
+    pageImage =
+      productImageFromJsonLd(
+        product
+      ) ||
+      metaContent(
+        page.html,
+        "property",
+        "og:image"
+      ) ||
+      metaContent(
+        page.html,
+        "name",
+        "twitter:image"
+      ) ||
+      null;
+
+    const metaPrice =
+      parseNumber(
+        metaContent(
+          page.html,
+          "itemprop",
+          "price"
+        )
+      );
+
+    pagePrice =
+      jsonOffer.price ??
+      metaPrice ??
+      priceFromPublicProductPage(
+        page.html
+      );
   }
-
-  const product =
-    findJsonLdProduct(page.html);
-
-  const jsonOffer =
-    offerFromJsonLd(product);
 
   const title =
-    product?.name ||
-    metaContent(
-      page.html,
-      "property",
-      "og:title"
-    ) ||
-    metaContent(
-      page.html,
-      "name",
-      "twitter:title"
-    ) ||
+    pageTitle ||
+    social?.title ||
     null;
 
   const image =
-    productImageFromJsonLd(product) ||
-    metaContent(
-      page.html,
-      "property",
-      "og:image"
-    ) ||
-    metaContent(
-      page.html,
-      "name",
-      "twitter:image"
-    ) ||
+    pageImage ||
+    social?.image ||
     null;
 
-  // Fallback adicional para preço exibido na página.
-  const htmlPrice =
-    parseNumber(
-      metaContent(
-        page.html,
-        "itemprop",
-        "price"
-      )
-    ) ??
-    parseNumber(
-      page.html.match(
-        /["']price["']\s*:\s*["']?(\d+(?:[.,]\d+)?)/i
-      )?.[1]
-    );
-
   const price =
-    jsonOffer.price ??
-    htmlPrice;
+    pagePrice ??
+    social?.price ??
+    null;
+
+  const originalPrice =
+    social?.originalPrice ??
+    null;
 
   if (
     !title ||
@@ -1098,24 +1541,34 @@ async function testItemPageFallback(candidate) {
     normalizeMlb(candidate.id);
 
   return {
-    resolutionType: "item_page_fallback",
+    resolutionType:
+      page?.html
+        ? "item_page_fallback"
+        : "social_page_fallback",
     sourceId: itemId,
     productId: null,
     itemId,
     title,
     image,
     price,
-    originalPrice: null,
+    originalPrice,
     currency:
       jsonOffer.currency || "BRL",
     priceSource:
-      "mercadolivre_public_page"
+      page?.html
+        ? (
+            social?.price === price
+              ? "mercadolivre_social_page"
+              : "mercadolivre_public_page"
+          )
+        : "mercadolivre_social_page"
   };
 }
 
 async function testItemCandidate(
   candidate,
-  accessToken
+  accessToken,
+  pages = []
 ) {
   const result = await mlRequest(
     `/items/${encodeURIComponent(candidate.id)}`,
@@ -1127,7 +1580,10 @@ async function testItemCandidate(
     // mas o endpoint /items/{id} pode negar o acesso para
     // nossa aplicação. Nesses casos usamos a própria página
     // pública do anúncio como fallback.
-    return testItemPageFallback(candidate);
+    return testItemPageFallback(
+      candidate,
+      pages
+    );
   }
 
   const item = result.data;
@@ -1181,7 +1637,8 @@ async function testItemCandidate(
 
 async function findOffer(
   candidates,
-  accessToken
+  accessToken,
+  pages = []
 ) {
   const attempts = [];
 
@@ -1200,7 +1657,8 @@ async function findOffer(
             )
           : await testItemCandidate(
               candidate,
-              accessToken
+              accessToken,
+              pages
             );
 
       attempts.push({
@@ -1274,7 +1732,8 @@ export default async function handler(req, res) {
 
     const found = await findOffer(
       resolved.candidates,
-      tokenData.access_token
+      tokenData.access_token,
+      resolved.pages
     );
 
     if (!found.offer) {

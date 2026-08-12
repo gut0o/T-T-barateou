@@ -1,113 +1,159 @@
-# T&T Barateou — Etapa 6.8B
+# T&T Barateou — Etapa 6.8C
 
-## Objetivo
+## Limite do Vercel
 
-A busca genérica da Etapa 6.8A retornou:
+Esta etapa NÃO cria uma nova Serverless Function.
+
+Continuamos com:
 
 ```text
-403 forbidden
+10 funções usadas
+12 permitidas
+2 vagas livres
 ```
 
-Agora testamos uma fonte oficial diferente:
+Alteramos apenas:
 
 ```text
-Mercado Livre
+api/discover-bestsellers.js
+```
+
+e adicionamos:
+
+```text
+lib/ml-bestsellers-enrichment.js
+```
+
+Arquivos em `lib/` não viram endpoints separados.
+
+## O que muda
+
+Antes:
+
+```text
+/highlights
+→ 20 IDs
+```
+
+Agora:
+
+```text
+/highlights
+→ 20 IDs
+→ pega somente TOP 3
+→ resolve detalhes
+```
+
+Para os três primeiros tentamos obter:
+
+```text
+título
+preço
+preço anterior
+desconto
+imagem
+permalink
+categoria
+domainId
+frete grátis
+```
+
+## ITEM
+
+Os ITEMs são consultados em lote usando:
+
+```text
+/items?ids=...
+```
+
+## USER_PRODUCT
+
+Para um `MLBU...`:
+
+```text
+/user-products/{id}
 ↓
-Mais vendidos da categoria
+seller
 ↓
-até 20 IDs ranqueados
+/users/{seller}/items/search?user_product_id=...
+↓
+itens associados
+↓
+escolhe um representante ativo com menor preço
 ```
 
-Endpoint utilizado:
-
-```text
-/highlights/MLB/category/{CATEGORY_ID}
-```
-
-## Importante
-
-Nesta etapa ainda NÃO:
-
-```text
-buscamos preço
-calculamos desconto
-geramos link afiliado
-pontuamos a oferta
-enviamos WhatsApp
-```
-
-Primeiro queremos somente provar que conseguimos
-descobrir produtos sem você fornecer um link.
+Isso é apenas uma estratégia de descoberta.
+Ainda não significa que esse item será publicado.
 
 ## Arquivos
+
+Substitua:
+
+```text
+api/discover-bestsellers.js
+```
 
 Adicione:
 
 ```text
-api/discover-bestsellers.js
-lib/ml-bestsellers-discovery.js
+lib/ml-bestsellers-enrichment.js
 ```
 
-Nada precisa ser substituído.
+`lib/ml-bestsellers-discovery.js` é incluído no ZIP apenas como referência;
+se já está no projeto, não precisa alterar.
 
 ## Deploy
 
 ```powershell
 git add .
-git commit -m "Adiciona descoberta por mais vendidos"
+git commit -m "Enriquece top 3 dos mais vendidos"
 git push
 ```
 
-## Primeiro teste
+## Teste
 
-Depois do deploy abra:
+Depois do deploy:
 
 ```text
 https://t-t-barateou.vercel.app/api/discover-bestsellers
 ```
 
-Por padrão ele consulta:
+Continue procurando:
 
 ```text
-MLB108704 = Vestidos
+candidateCount: 20
 ```
 
-Essa categoria foi escolhida porque já sabemos no nosso projeto
-que ela é uma categoria folha.
+e agora também:
 
-## Resultado esperado
+```text
+enrichmentLimit: 3
+enrichedCandidateCount: 3
+enrichedCandidates: [...]
+```
 
-Algo parecido com:
+Cada candidato resolvido deve ter algo semelhante a:
 
 ```json
 {
-  "ok": true,
-  "source": "mercadolivre_highlights",
-  "highlightType": "BEST_SELLER",
-  "criteria": "CATEGORY",
-  "categoryId": "MLB108704",
-  "candidateCount": 20,
-  "candidates": [
-    {
-      "id": "...",
-      "position": 1,
-      "type": "PRODUCT"
-    }
-  ]
+  "rank": 1,
+  "sourceType": "ITEM",
+  "resolved": true,
+  "title": "...",
+  "price": 109.9,
+  "originalPrice": 149.99,
+  "discount": 27,
+  "image": "...",
+  "permalink": "...",
+  "categoryId": "..."
 }
 ```
 
-Os tipos podem ser:
+## Ainda não fazemos
 
 ```text
-ITEM
-PRODUCT
-USER_PRODUCT
+link afiliado
+score final
+publicação automática
+WhatsApp
 ```
-
-## Se der 404
-
-Isso pode significar que o Mercado Livre não mantém um ranking
-de mais vendidos para essa categoria específica.
-
-Nesse caso testaremos outra categoria folha.

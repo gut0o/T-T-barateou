@@ -1,112 +1,108 @@
-# T&T Barateou — Etapa 6.7L
+# T&T Barateou — Etapa 6.8A
 
-Objetivo:
+## Objetivo
 
-Diferenciar:
+Primeira prova de descoberta automática.
 
-```text
-oferta realmente fraca
-```
-
-de:
+Até agora o fluxo começava assim:
 
 ```text
-oferta que ainda não tem dados suficientes para ser avaliada
+você fornece um link
+↓
+T&T analisa a oferta
 ```
 
-## Nova regra
-
-Se não houver:
+Agora começamos a testar:
 
 ```text
-desconto confirmado
-E
-comissão conhecida
+T&T faz uma busca
+↓
+encontra produtos candidatos
+↓
+retorna título + preço + imagem + link normal
 ```
 
-o sistema retorna:
+Ainda NÃO:
 
 ```text
-offerScore: null
-priority: unknown
-scoreStatus: insufficient_data
+gera link de afiliado
+envia ao WhatsApp
+publica automaticamente
 ```
-
-Isso evita que uma oferta boa seja tratada como ruim apenas porque
-o Mercado Livre não retornou desconto ou porque a comissão daquela
-categoria ainda não está cadastrada.
-
-## Quando existe dado suficiente
-
-Se houver desconto OU comissão conhecida, a pontuação continua sendo
-calculada normalmente.
-
-Exemplo do ar-condicionado:
-
-```text
-sem desconto
-mas comissão conhecida
-→ score calculado normalmente
-```
-
-Exemplo da creatina atual:
-
-```text
-sem desconto
-comissão desconhecida
-→ insufficient_data
-→ priority: unknown
-```
-
-## Novos campos
-
-```text
-scoreStatus
-scoreSignals
-scoreVersion: TT-1.1
-```
-
-`scoreSignals` mostra internamente quais sinais estavam disponíveis.
 
 ## Arquivos
 
-Substitua:
+Adicione:
 
 ```text
-api/offer.js
-lib/offer-scoring.js
+api/discover-offers.js
+lib/ml-offer-discovery.js
 ```
+
+Nenhum arquivo atual precisa ser substituído.
 
 ## Deploy
 
 ```powershell
 git add .
-git commit -m "Diferencia score baixo de dados insuficientes"
+git commit -m "Adiciona primeira descoberta automatica de ofertas"
 git push
 ```
 
-## Primeiro teste — creatina
+## Primeiro teste
+
+Depois que o Vercel terminar:
 
 ```text
-https://t-t-barateou.vercel.app/api/offer?link=https%3A%2F%2Fmeli.la%2F2EMjkct
+https://t-t-barateou.vercel.app/api/discover-offers
 ```
 
-Esperado:
+Sem parâmetro, o teste usa:
 
 ```text
-offerScore: null
-priority: unknown
-scoreStatus: insufficient_data
-
-scoreSignals:
-  hasDiscountData: false
-  hasCommissionData: false
+smartphone
 ```
 
-## Segundo teste — ar-condicionado
+e tenta trazer até 5 candidatos.
 
-Deve continuar calculando normalmente porque a comissão é conhecida.
+Se funcionar, esperamos:
 
-## WhatsApp
+```json
+{
+  "ok": true,
+  "query": "smartphone",
+  "resultCount": 5,
+  "candidates": [
+    {
+      "itemId": "...",
+      "title": "...",
+      "price": 0,
+      "permalink": "...",
+      "categoryId": "..."
+    }
+  ]
+}
+```
 
-Nada foi alterado no bot.
+## Se retornar 401 ou 403
+
+Não é vazamento de token e não significa que nosso projeto quebrou.
+
+O endpoint devolverá algo como:
+
+```text
+ok: false
+httpStatus: 403
+```
+
+Nesse caso a Etapa 6.8A serviu para confirmar que essa modalidade
+de busca não está habilitada para nossa credencial, e mudamos a
+estratégia de descoberta na próxima microetapa.
+
+## Teste opcional depois
+
+Somente se o primeiro funcionar:
+
+```text
+https://t-t-barateou.vercel.app/api/discover-offers?q=air%20fryer&limit=5
+```

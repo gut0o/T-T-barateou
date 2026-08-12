@@ -1,113 +1,108 @@
-# T&T Barateou — Etapa 6.8B
+# T&T Barateou — Etapa 6.8A
 
 ## Objetivo
 
-A busca genérica da Etapa 6.8A retornou:
+Primeira prova de descoberta automática.
+
+Até agora o fluxo começava assim:
 
 ```text
-403 forbidden
-```
-
-Agora testamos uma fonte oficial diferente:
-
-```text
-Mercado Livre
+você fornece um link
 ↓
-Mais vendidos da categoria
+T&T analisa a oferta
+```
+
+Agora começamos a testar:
+
+```text
+T&T faz uma busca
 ↓
-até 20 IDs ranqueados
+encontra produtos candidatos
+↓
+retorna título + preço + imagem + link normal
 ```
 
-Endpoint utilizado:
+Ainda NÃO:
 
 ```text
-/highlights/MLB/category/{CATEGORY_ID}
+gera link de afiliado
+envia ao WhatsApp
+publica automaticamente
 ```
-
-## Importante
-
-Nesta etapa ainda NÃO:
-
-```text
-buscamos preço
-calculamos desconto
-geramos link afiliado
-pontuamos a oferta
-enviamos WhatsApp
-```
-
-Primeiro queremos somente provar que conseguimos
-descobrir produtos sem você fornecer um link.
 
 ## Arquivos
 
 Adicione:
 
 ```text
-api/discover-bestsellers.js
-lib/ml-bestsellers-discovery.js
+api/discover-offers.js
+lib/ml-offer-discovery.js
 ```
 
-Nada precisa ser substituído.
+Nenhum arquivo atual precisa ser substituído.
 
 ## Deploy
 
 ```powershell
 git add .
-git commit -m "Adiciona descoberta por mais vendidos"
+git commit -m "Adiciona primeira descoberta automatica de ofertas"
 git push
 ```
 
 ## Primeiro teste
 
-Depois do deploy abra:
+Depois que o Vercel terminar:
 
 ```text
-https://t-t-barateou.vercel.app/api/discover-bestsellers
+https://t-t-barateou.vercel.app/api/discover-offers
 ```
 
-Por padrão ele consulta:
+Sem parâmetro, o teste usa:
 
 ```text
-MLB108704 = Vestidos
+smartphone
 ```
 
-Essa categoria foi escolhida porque já sabemos no nosso projeto
-que ela é uma categoria folha.
+e tenta trazer até 5 candidatos.
 
-## Resultado esperado
-
-Algo parecido com:
+Se funcionar, esperamos:
 
 ```json
 {
   "ok": true,
-  "source": "mercadolivre_highlights",
-  "highlightType": "BEST_SELLER",
-  "criteria": "CATEGORY",
-  "categoryId": "MLB108704",
-  "candidateCount": 20,
+  "query": "smartphone",
+  "resultCount": 5,
   "candidates": [
     {
-      "id": "...",
-      "position": 1,
-      "type": "PRODUCT"
+      "itemId": "...",
+      "title": "...",
+      "price": 0,
+      "permalink": "...",
+      "categoryId": "..."
     }
   ]
 }
 ```
 
-Os tipos podem ser:
+## Se retornar 401 ou 403
+
+Não é vazamento de token e não significa que nosso projeto quebrou.
+
+O endpoint devolverá algo como:
 
 ```text
-ITEM
-PRODUCT
-USER_PRODUCT
+ok: false
+httpStatus: 403
 ```
 
-## Se der 404
+Nesse caso a Etapa 6.8A serviu para confirmar que essa modalidade
+de busca não está habilitada para nossa credencial, e mudamos a
+estratégia de descoberta na próxima microetapa.
 
-Isso pode significar que o Mercado Livre não mantém um ranking
-de mais vendidos para essa categoria específica.
+## Teste opcional depois
 
-Nesse caso testaremos outra categoria folha.
+Somente se o primeiro funcionar:
+
+```text
+https://t-t-barateou.vercel.app/api/discover-offers?q=air%20fryer&limit=5
+```

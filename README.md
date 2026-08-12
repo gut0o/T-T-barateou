@@ -1,89 +1,31 @@
-# T&T Barateou — Etapa 6.8C
+# Correção 6.8C — diagnóstico + fallback público
 
 ## Limite do Vercel
 
-Esta etapa NÃO cria uma nova Serverless Function.
-
-Continuamos com:
+Nenhuma função nova:
 
 ```text
-10 funções usadas
-12 permitidas
-2 vagas livres
+10 / 12 Serverless Functions
 ```
 
-Alteramos apenas:
+## Por que esta correção
 
-```text
-api/discover-bestsellers.js
-```
+O `/highlights` encontrou os mais vendidos, mas os três primeiros
+não conseguiram obter detalhes.
 
-e adicionamos:
-
-```text
-lib/ml-bestsellers-enrichment.js
-```
-
-Arquivos em `lib/` não viram endpoints separados.
-
-## O que muda
-
-Antes:
-
-```text
-/highlights
-→ 20 IDs
-```
-
-Agora:
-
-```text
-/highlights
-→ 20 IDs
-→ pega somente TOP 3
-→ resolve detalhes
-```
-
-Para os três primeiros tentamos obter:
-
-```text
-título
-preço
-preço anterior
-desconto
-imagem
-permalink
-categoria
-domainId
-frete grátis
-```
-
-## ITEM
-
-Os ITEMs são consultados em lote usando:
+Agora, para ITEM:
 
 ```text
 /items?ids=...
+↓
+tenta COM token
+↓
+se bloquear
+↓
+tenta a mesma consulta SEM Authorization
 ```
 
-## USER_PRODUCT
-
-Para um `MLBU...`:
-
-```text
-/user-products/{id}
-↓
-seller
-↓
-/users/{seller}/items/search?user_product_id=...
-↓
-itens associados
-↓
-escolhe um representante ativo com menor preço
-```
-
-Isso é apenas uma estratégia de descoberta.
-Ainda não significa que esse item será publicado.
+Também mostramos o código retornado em cada tentativa.
 
 ## Arquivos
 
@@ -91,69 +33,49 @@ Substitua:
 
 ```text
 api/discover-bestsellers.js
-```
-
-Adicione:
-
-```text
 lib/ml-bestsellers-enrichment.js
 ```
-
-`lib/ml-bestsellers-discovery.js` é incluído no ZIP apenas como referência;
-se já está no projeto, não precisa alterar.
 
 ## Deploy
 
 ```powershell
 git add .
-git commit -m "Enriquece top 3 dos mais vendidos"
+git commit -m "Adiciona fallback publico ao enriquecimento"
 git push
 ```
 
 ## Teste
 
-Depois do deploy:
-
 ```text
 https://t-t-barateou.vercel.app/api/discover-bestsellers
 ```
 
-Continue procurando:
+Procure:
 
 ```text
-candidateCount: 20
+directItemRequestMode
 ```
 
-e agora também:
+Se o fallback funcionar:
 
 ```text
-enrichmentLimit: 3
-enrichedCandidateCount: 3
-enrichedCandidates: [...]
+enrichedResolvedCount > 0
 ```
 
-Cada candidato resolvido deve ter algo semelhante a:
+Se continuar bloqueado, cada ITEM não resolvido terá:
 
 ```json
-{
-  "rank": 1,
-  "sourceType": "ITEM",
-  "resolved": true,
-  "title": "...",
-  "price": 109.9,
-  "originalPrice": 149.99,
-  "discount": 27,
-  "image": "...",
-  "permalink": "...",
-  "categoryId": "..."
+"itemApiDiagnostic": {
+  "authorized": {
+    "code": 403,
+    "message": "..."
+  },
+  "public": {
+    "code": 403,
+    "message": "..."
+  }
 }
 ```
 
-## Ainda não fazemos
-
-```text
-link afiliado
-score final
-publicação automática
-WhatsApp
-```
+Com isso sabemos exatamente qual caminho ainda está acessível,
+sem criar endpoints novos e sem adivinhar.

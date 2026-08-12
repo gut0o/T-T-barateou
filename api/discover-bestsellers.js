@@ -92,6 +92,9 @@ export default async function handler(
         enrichedCandidateCount:
           enrichment.requested,
 
+        directItemRequestMode:
+          enrichment.directItemRequestMode,
+
         enrichedResolvedCount:
           enrichment.resolvedCount,
 

@@ -2145,8 +2145,14 @@ export default async function handler(req, res) {
       priority:
         offerScoring.priority,
 
+      scoreStatus:
+        offerScoring.scoreStatus,
+
       scoreBreakdown:
         offerScoring.scoreBreakdown,
+
+      scoreSignals:
+        offerScoring.scoreSignals,
 
       scoreVersion:
         offerScoring.scoreVersion,

@@ -30,6 +30,11 @@ import {
   queuePendingPublications
 } from "../lib/tt-pending-publication-store.js";
 
+import {
+  handleAttachAffiliateAction,
+  handleQueueListAction
+} from "../lib/tt-queue-admin-actions.js";
+
 
 const PRODUCT_SCAN_LIMIT = 5;
 
@@ -273,12 +278,12 @@ export default async function handler(
   res
 ) {
   if (
-    req.method !==
-    "GET"
+    req.method !== "GET" &&
+    req.method !== "POST"
   ) {
     res.setHeader(
       "Allow",
-      "GET"
+      "GET, POST"
     );
 
     return res
@@ -287,7 +292,7 @@ export default async function handler(
         ok: false,
 
         error:
-          "Use GET neste endpoint.",
+          "Use GET ou POST neste endpoint.",
 
         accessTokenExposed:
           false,
@@ -298,6 +303,93 @@ export default async function handler(
   }
 
   try {
+    const action =
+      String(
+        req.query?.action ||
+        req.body?.action ||
+        ""
+      )
+        .trim()
+        .toLowerCase();
+
+    if (
+      action ===
+      "queue-list"
+    ) {
+      const result =
+        await handleQueueListAction(
+          req
+        );
+
+      return res
+        .status(200)
+        .json(
+          result
+        );
+    }
+
+    if (
+      action ===
+      "attach-affiliate-link"
+    ) {
+      if (
+        req.method !==
+        "POST"
+      ) {
+        return res
+          .status(405)
+          .json({
+            ok:
+              false,
+
+            error:
+              "Use POST para anexar link afiliado.",
+
+            accessTokenExposed:
+              false,
+
+            refreshTokenExposed:
+              false
+          });
+      }
+
+      const result =
+        await handleAttachAffiliateAction(
+          req
+        );
+
+      return res
+        .status(
+          result.ok === false
+            ? 400
+            : 200
+        )
+        .json(
+          result
+        );
+    }
+
+    if (
+      req.method !==
+      "GET"
+    ) {
+      return res
+        .status(400)
+        .json({
+          ok:
+            false,
+
+          error:
+            "POST exige uma action válida.",
+
+          accessTokenExposed:
+            false,
+
+          refreshTokenExposed:
+            false
+        });
+    }
+
     const tokenData =
       await getValidMlTokenData();
 
@@ -435,7 +527,25 @@ export default async function handler(
         status:
           "queue_saved",
 
-        ...persistence
+        requestedCount:
+          persistence
+            .requestedCount,
+
+        queuedCount:
+          persistence
+            .queuedCount,
+
+        newQueuedCount:
+          persistence
+            .newQueuedCount,
+
+        duplicateCount:
+          persistence
+            .duplicateCount,
+
+        results:
+          persistence
+            .results
       };
     }
 
@@ -497,13 +607,18 @@ export default async function handler(
       });
   } catch (error) {
     return res
-      .status(500)
+      .status(
+        Number(
+          error?.statusCode
+        ) ||
+        500
+      )
       .json({
         ok: false,
 
         error:
           error?.message ||
-          "Erro inesperado ao consultar mais vendidos.",
+          "Erro inesperado ao processar a solicitação.",
 
         accessTokenExposed:
           false,

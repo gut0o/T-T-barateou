@@ -1,10 +1,6 @@
-# T&T Barateou — Pacote acelerado 6.9A → 6.9D
+# T&T Barateou — Pacote acelerado 6.10A → 6.10D
 
-Este pacote faz 4 passos de uma vez.
-
-## Vercel
-
-Nenhuma Serverless Function nova.
+Este pacote continua sem criar nenhuma Serverless Function nova.
 
 ```text
 10 usadas
@@ -12,196 +8,252 @@ Nenhuma Serverless Function nova.
 2 vagas livres
 ```
 
-Arquivos novos ficam em `lib/`, portanto não criam endpoints.
+## 6.10A — Corrige metadados da fila
+
+Antes havia uma colisão no campo:
+
+```text
+queuePersistence.requested
+```
+
+Agora fica claro:
+
+```text
+requested: true
+requestedCount: 2
+queuedCount: 2
+newQueuedCount: 2
+duplicateCount: 0
+```
 
 ---
 
-## Passo 1 — Seleção de publicação
+## 6.10B — Lista fila
 
-A shortlist continua existindo.
-
-Agora o T&T separa:
+A mesma função `discover-bestsellers` agora aceita uma ação administrativa:
 
 ```text
-high / medium
-→ ready
-
-low / unknown / dados incompletos
-→ held
+action=queue-list
 ```
 
-No máximo 3 ofertas entram como `ready` por execução.
+Ela exige o header:
+
+```text
+x-tt-admin-key
+```
+
+A chave vem do ambiente:
+
+```text
+TT_QUEUE_ADMIN_KEY
+```
+
+Pode filtrar:
+
+```text
+awaiting_affiliate_link
+ready_to_publish
+```
 
 ---
 
-## Passo 2 — Mensagem pronta
+## 6.10C — Anexa e VALIDA o link afiliado
 
-Cada oferta `ready` recebe:
+A ação:
 
 ```text
-messageDraft
+attach-affiliate-link
 ```
 
-Exemplo:
+recebe:
 
 ```text
-🔥 T&T BARATEOU
+itemId
+affiliateLink
+```
 
-🛒 Nome do produto
-De: R$ 259,90
-💰 Por: R$ 129,95
-🔥 50% OFF
-🚚 Frete grátis
+Antes de alterar a fila, ela chama o `/api/offer` do mesmo deployment.
 
-👇 Comprar no Mercado Livre:
+O link só é aceito se resolver para:
+
+```text
+o mesmo itemId
+OU
+o mesmo productId
+```
+
+Se o link levar a outro produto:
+
+```text
+queueUpdated: false
+```
+
+Nada é gravado.
+
+---
+
+## 6.10D — Prepara payload do WhatsApp
+
+Quando o link é válido:
+
+```text
+awaiting_affiliate_link
+↓
+ready_to_publish
+```
+
+E o placeholder:
+
+```text
 [LINK_AFILIADO_PENDENTE]
 ```
 
-IMPORTANTE:
+vira o link real.
 
-A mensagem NÃO mostra:
+Também é criado:
+
+```json
+{
+  "whatsappPayload": {
+    "image": "...",
+    "caption": "...",
+    "ttCategoryId": "...",
+    "ttCategoryName": "..."
+  }
+}
+```
+
+Ainda NÃO envia nada ao WhatsApp.
+
+---
+
+# Segurança
+
+Antes de testar as ações administrativas, crie uma variável secreta no Vercel:
 
 ```text
-comissão
-score
-priority
-dados internos
+TT_QUEUE_ADMIN_KEY
+```
+
+Não use Client Secret, token do Mercado Livre ou BLOB token como essa chave.
+
+Crie uma senha aleatória nova e guarde somente com você.
+
+Depois de adicionar a variável ao Vercel:
+
+```text
+Redeploy
 ```
 
 ---
 
-## Passo 3 — Estado do link afiliado
-
-A oferta fica com:
-
-```text
-publicationStatus: awaiting_affiliate_link
-affiliateLink: null
-affiliateLinkStatus: pending
-```
-
-Isso cria um ponto claro para encaixarmos a geração do link depois.
-
----
-
-## Passo 4 — Fila privada + deduplicação
-
-Com:
-
-```text
-?queue=1
-```
-
-as ofertas `ready` são gravadas no Vercel Blob privado.
-
-Estrutura:
-
-```text
-tt/publication-queue/pending/
-  bebes_criancas/
-    MLBxxxx.json
-```
-
-O `itemId` vira a chave.
-
-Se rodar de novo com o mesmo produto:
-
-```text
-alreadyQueued: true
-```
-
-e não cria duplicata.
-
----
-
-## Arquivos
+# Arquivos
 
 Substitua:
 
 ```text
 api/discover-bestsellers.js
-lib/ml-bestsellers-enrichment.js
+lib/tt-pending-publication-store.js
 ```
 
 Adicione:
 
 ```text
-lib/tt-publication-planner.js
-lib/tt-pending-publication-store.js
+lib/tt-queue-admin-actions.js
 ```
 
-## Deploy
+Os outros dois arquivos estão no ZIP apenas para manter o pacote autocontido:
+
+```text
+lib/tt-publication-planner.js
+lib/ml-bestsellers-enrichment.js
+```
+
+---
+
+# Deploy
 
 ```powershell
 git add .
-git commit -m "Adiciona plano e fila de publicacao"
+git commit -m "Adiciona gerenciamento seguro da fila"
 git push
 ```
 
 ---
 
-## Teste único
+# PRIMEIRO TESTE
 
-Depois do deploy:
+Depois de configurar `TT_QUEUE_ADMIN_KEY`, no PowerShell:
 
-```text
-https://t-t-barateou.vercel.app/api/discover-bestsellers?categoryId=MLB432825&queue=1&cb=20260814queue
+```powershell
+$TTKEY = "COLOQUE_AQUI_A_MESMA_CHAVE_DO_VERCEL"
+
+$headers = @{
+  "x-tt-admin-key" = $TTKEY
+}
+
+Invoke-RestMethod `
+  -Method GET `
+  -Uri "https://t-t-barateou.vercel.app/api/discover-bestsellers?action=queue-list&status=awaiting_affiliate_link" `
+  -Headers $headers |
+  ConvertTo-Json -Depth 10
 ```
 
-Procure:
+Esperamos ver os dois produtos já gravados:
 
 ```text
-publicationPlan
-queuePersistence
+MLB7397304804
+MLB7266891468
 ```
-
-Idealmente, com os dados do teste anterior:
-
-```text
-publicationPlan.readyCount: 2
-publicationPlan.heldCount: 3
-
-queuePersistence.status: queue_saved
-queuePersistence.newQueuedCount: 2
-```
-
-Dentro de `publicationPlan.ready` queremos ver:
-
-```text
-publicationStatus: awaiting_affiliate_link
-affiliateLinkStatus: pending
-messageDraft
-```
-
-## Segundo clique opcional
-
-Se abrir a mesma URL novamente:
-
-```text
-queuePersistence.duplicateCount
-```
-
-deve aumentar, comprovando que o mesmo item não foi duplicado.
 
 ---
 
-## Ainda não faz
+# QUANDO VOCÊ TIVER UM LINK AFILIADO
 
-```text
-geração automática de link afiliado
-envio ao WhatsApp
-grupo real
-agendamento automático
+Exemplo:
+
+```powershell
+$body = @{
+  action = "attach-affiliate-link"
+  itemId = "MLB7397304804"
+  affiliateLink = "https://meli.la/SEU_LINK"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method POST `
+  -Uri "https://t-t-barateou.vercel.app/api/discover-bestsellers?action=attach-affiliate-link" `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body $body |
+  ConvertTo-Json -Depth 10
 ```
 
-Mas depois deste pacote o pipeline fica:
+Se for o produto correto:
 
 ```text
-descoberta
-→ análise
-→ shortlist
-→ aprovação automática high/medium
-→ mensagem pronta
-→ fila persistente
-→ AGUARDA LINK AFILIADO
+ok: true
+queueUpdated: true
+publicationStatus: ready_to_publish
+whatsappPayload: {...}
+```
+
+Se for produto errado:
+
+```text
+ok: false
+queueUpdated: false
+```
+
+---
+
+# Ainda pendente
+
+Depois desta etapa só falta encaixar:
+
+```text
+link afiliado
+→ ready_to_publish
+→ bot local lê payload
+→ grupo correto
+→ envio WhatsApp
 ```

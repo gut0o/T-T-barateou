@@ -22,8 +22,30 @@ import {
   routeToTtCategory
 } from "../lib/tt-category-routing.js";
 
+import {
+  buildPublicationPlan
+} from "../lib/tt-publication-planner.js";
+
+import {
+  queuePendingPublications
+} from "../lib/tt-pending-publication-store.js";
+
 
 const PRODUCT_SCAN_LIMIT = 5;
+
+function queryFlag(value) {
+  const normalized =
+    String(value || "")
+      .trim()
+      .toLowerCase();
+
+  return (
+    normalized === "1" ||
+    normalized === "true" ||
+    normalized === "yes" ||
+    normalized === "sim"
+  );
+}
 
 function estimateCommissionValue(
   price,
@@ -363,6 +385,60 @@ export default async function handler(
         readyCandidates
       );
 
+    const publicationPlan =
+      buildPublicationPlan({
+        shortlist,
+        maxPublications:
+          3
+      });
+
+    const persistQueue =
+      queryFlag(
+        req.query?.queue
+      );
+
+    let queuePersistence = {
+      requested:
+        persistQueue,
+
+      status:
+        persistQueue
+          ? "nothing_to_queue"
+          : "not_requested",
+
+      queuedCount:
+        0,
+
+      newQueuedCount:
+        0,
+
+      duplicateCount:
+        0,
+
+      results:
+        []
+    };
+
+    if (
+      persistQueue &&
+      publicationPlan.ready.length
+    ) {
+      const persistence =
+        await queuePendingPublications(
+          publicationPlan.ready
+        );
+
+      queuePersistence = {
+        requested:
+          true,
+
+        status:
+          "queue_saved",
+
+        ...persistence
+      };
+    }
+
     return res
       .status(200)
       .json({
@@ -404,13 +480,20 @@ export default async function handler(
             ? "offers_ready_for_next_stage"
             : "no_ready_offers",
 
+        publicationPlan,
+
+        queuePersistence,
+
+        queueRequested:
+          persistQueue,
+
         nextStage:
-          shortlist.length > 0
-            ? "affiliate_link_generation"
+          publicationPlan.ready.length > 0
+            ? "fill_affiliate_links_then_publish"
             : "try_another_leaf_category",
 
         note:
-          "O T&T agora procura PRODUCTs no top 20, tenta obter uma publicação representativa, calcula categoria, comissão, score e categoria T&T e devolve uma shortlist. Nada é publicado automaticamente."
+          "O T&T descobre, analisa, seleciona até 3 ofertas high/medium, monta a mensagem pronta e, com queue=1, grava uma fila privada sem duplicar produtos. O link afiliado e o envio ao WhatsApp continuam pendentes."
       });
   } catch (error) {
     return res

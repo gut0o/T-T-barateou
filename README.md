@@ -1,10 +1,10 @@
-# T&T Barateou — Pacote acelerado 6.8E → 6.8G
+# T&T Barateou — Pacote acelerado 6.9A → 6.9D
 
-Este pacote junta várias microetapas em um único deploy/teste.
+Este pacote faz 4 passos de uma vez.
 
-## Limite do Vercel
+## Vercel
 
-Nenhuma nova Serverless Function.
+Nenhuma Serverless Function nova.
 
 ```text
 10 usadas
@@ -12,95 +12,107 @@ Nenhuma nova Serverless Function.
 2 vagas livres
 ```
 
-## O que este pacote faz
+Arquivos novos ficam em `lib/`, portanto não criam endpoints.
 
-### 1. Descoberta
+---
+
+## Passo 1 — Seleção de publicação
+
+A shortlist continua existindo.
+
+Agora o T&T separa:
 
 ```text
-/highlights
-→ top 20 da categoria
+high / medium
+→ ready
+
+low / unknown / dados incompletos
+→ held
 ```
 
-### 2. Filtragem inteligente
+No máximo 3 ofertas entram como `ready` por execução.
 
-Como nossa credencial já demonstrou bloqueio nos detalhes de:
+---
+
+## Passo 2 — Mensagem pronta
+
+Cada oferta `ready` recebe:
 
 ```text
-ITEM
-USER_PRODUCT
+messageDraft
 ```
 
-o T&T passa a procurar dentro do top 20 os primeiros:
+Exemplo:
 
 ```text
-até 5 PRODUCT
+🔥 T&T BARATEOU
+
+🛒 Nome do produto
+De: R$ 259,90
+💰 Por: R$ 129,95
+🔥 50% OFF
+🚚 Frete grátis
+
+👇 Comprar no Mercado Livre:
+[LINK_AFILIADO_PENDENTE]
 ```
 
-Assim não desperdiçamos chamadas nos tipos já conhecidos como bloqueados.
+IMPORTANTE:
 
-### 3. Resolução de PRODUCT
-
-```text
-/products/{PRODUCT_ID}
-```
-
-Se houver:
+A mensagem NÃO mostra:
 
 ```text
-buy_box_winner
-```
-
-usamos o vencedor.
-
-Se NÃO houver:
-
-```text
-/products/{PRODUCT_ID}/items
-```
-
-e escolhemos temporariamente a publicação de menor preço como
-representante para análise.
-
-Isso ainda NÃO significa publicação automática.
-
-### 4. Inteligência que já construímos
-
-Cada candidato resolvido passa por:
-
-```text
-categoria Mercado Livre
-→ categoria raiz
-→ comissão
-→ comissão estimada em R$
-→ offerScore
-→ priority
-→ categoria T&T
-```
-
-### 5. Shortlist
-
-O endpoint devolve:
-
-```text
-analyzedCandidates
-shortlist
-```
-
-A shortlist contém apenas candidatos com:
-
-```text
-título
-imagem
-preço
-```
-
-e ordena por:
-
-```text
+comissão
+score
 priority
-→ offerScore
-→ posição nos mais vendidos
+dados internos
 ```
+
+---
+
+## Passo 3 — Estado do link afiliado
+
+A oferta fica com:
+
+```text
+publicationStatus: awaiting_affiliate_link
+affiliateLink: null
+affiliateLinkStatus: pending
+```
+
+Isso cria um ponto claro para encaixarmos a geração do link depois.
+
+---
+
+## Passo 4 — Fila privada + deduplicação
+
+Com:
+
+```text
+?queue=1
+```
+
+as ofertas `ready` são gravadas no Vercel Blob privado.
+
+Estrutura:
+
+```text
+tt/publication-queue/pending/
+  bebes_criancas/
+    MLBxxxx.json
+```
+
+O `itemId` vira a chave.
+
+Se rodar de novo com o mesmo produto:
+
+```text
+alreadyQueued: true
+```
+
+e não cria duplicata.
+
+---
 
 ## Arquivos
 
@@ -111,76 +123,85 @@ api/discover-bestsellers.js
 lib/ml-bestsellers-enrichment.js
 ```
 
-Nenhum arquivo novo em `api/`.
-
-## Dependências já existentes no projeto
-
-Este pacote reutiliza:
+Adicione:
 
 ```text
-lib/ml-offer-category-enrichment.js
-lib/offer-scoring.js
-lib/tt-category-routing.js
+lib/tt-publication-planner.js
+lib/tt-pending-publication-store.js
 ```
-
-Esses arquivos já foram adicionados nas etapas anteriores.
 
 ## Deploy
 
 ```powershell
 git add .
-git commit -m "Cria shortlist automatica de ofertas"
+git commit -m "Adiciona plano e fila de publicacao"
 git push
 ```
+
+---
 
 ## Teste único
 
 Depois do deploy:
 
 ```text
-https://t-t-barateou.vercel.app/api/discover-bestsellers?categoryId=MLB432825&cb=20260814batch
+https://t-t-barateou.vercel.app/api/discover-bestsellers?categoryId=MLB432825&queue=1&cb=20260814queue
 ```
 
-## O que procurar
-
-Idealmente:
+Procure:
 
 ```text
-selectedProductCount: 5
-enrichedResolvedCount: > 0
-readyCandidateCount: > 0
-shortlistStatus: offers_ready_for_next_stage
+publicationPlan
+queuePersistence
 ```
 
-Dentro de `shortlist` queremos ofertas com:
+Idealmente, com os dados do teste anterior:
 
 ```text
-title
-price
-image
-itemId
-categoryId
-rootCategory
-commissionKnown
-directCommissionPercent
-estimatedDirectCommission
-offerScore
-priority
-ttCategoryId
-ttCategoryName
-automationReadiness
+publicationPlan.readyCount: 2
+publicationPlan.heldCount: 3
+
+queuePersistence.status: queue_saved
+queuePersistence.newQueuedCount: 2
 ```
 
-## O que continua fora deste pacote
+Dentro de `publicationPlan.ready` queremos ver:
 
-Ainda NÃO fazemos:
+```text
+publicationStatus: awaiting_affiliate_link
+affiliateLinkStatus: pending
+messageDraft
+```
+
+## Segundo clique opcional
+
+Se abrir a mesma URL novamente:
+
+```text
+queuePersistence.duplicateCount
+```
+
+deve aumentar, comprovando que o mesmo item não foi duplicado.
+
+---
+
+## Ainda não faz
 
 ```text
 geração automática de link afiliado
-envio automático ao WhatsApp
-seleção dos grupos reais
-agendamento periódico
+envio ao WhatsApp
+grupo real
+agendamento automático
 ```
 
-Se a shortlist funcionar, o próximo bloco pode atacar link afiliado +
-mensagem + fila de publicação de uma vez.
+Mas depois deste pacote o pipeline fica:
+
+```text
+descoberta
+→ análise
+→ shortlist
+→ aprovação automática high/medium
+→ mensagem pronta
+→ fila persistente
+→ AGUARDA LINK AFILIADO
+```

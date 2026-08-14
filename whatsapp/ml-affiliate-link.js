@@ -58,7 +58,7 @@ export function affiliateSessionStatus() {
   };
 }
 
-function normalizeCatalogUrl({
+function initialCatalogUrl({
   productId,
   catalogPageUrl
 }) {
@@ -78,8 +78,99 @@ function normalizeCatalogUrl({
     );
   }
 
-  // O payload observado na interface enviava a URL sem protocolo.
-  return raw
+  return /^https?:\/\//i.test(
+    raw
+  )
+    ? raw
+    : `https://${raw.replace(/^\/+/, "")}`;
+}
+
+async function resolveCanonicalProductUrl({
+  productId,
+  catalogPageUrl
+}) {
+  const initial =
+    initialCatalogUrl({
+      productId,
+      catalogPageUrl
+    });
+
+  try {
+    const response =
+      await fetch(
+        initial,
+        {
+          method:
+            "GET",
+
+          redirect:
+            "follow",
+
+          headers: {
+            Accept:
+              "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+
+            "Accept-Language":
+              "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+
+            "User-Agent":
+              env(
+                "ML_AFFILIATE_USER_AGENT"
+              ) ||
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+          }
+        }
+      );
+
+    const finalUrl =
+      String(
+        response.url ||
+        initial
+      ).trim();
+
+    if (
+      finalUrl &&
+      /mercadolivre\.com\.br/i.test(
+        finalUrl
+      )
+    ) {
+      return {
+        url:
+          finalUrl,
+
+        mode:
+          finalUrl !== initial
+            ? "redirect_resolved"
+            : "original_url",
+
+        httpStatus:
+          response.status
+      };
+    }
+  } catch {
+    // Fallback seguro para a URL inicial.
+  }
+
+  return {
+    url:
+      initial,
+
+    mode:
+      "initial_url_fallback",
+
+    httpStatus:
+      null
+  };
+}
+
+function urlForAffiliatePayload(
+  url
+) {
+  return String(
+    url ||
+    ""
+  )
+    .trim()
     .replace(
       /^https?:\/\//i,
       ""
@@ -140,11 +231,16 @@ export async function createAffiliateLink({
       "ML_AFFILIATE_TAG"
     );
 
-  const targetUrl =
-    normalizeCatalogUrl({
+  const canonical =
+    await resolveCanonicalProductUrl({
       productId,
       catalogPageUrl
     });
+
+  const targetUrl =
+    urlForAffiliatePayload(
+      canonical.url
+    );
 
   const payload = {
     itemId:
@@ -245,25 +341,133 @@ export async function createAffiliateLink({
     );
   }
 
-  const first =
-    Array.isArray(
-      body?.urls
-    )
-      ? body.urls.find(
-          (entry) =>
-            typeof entry
-              ?.short_url ===
-              "string" &&
-            entry.short_url
-              .startsWith(
-                "https://meli.la/"
-              )
-        )
-      : null;
+  const candidates = [
+    ...(
+      Array.isArray(
+        body?.urls
+      )
+        ? body.urls
+        : []
+    ),
 
-  if (!first) {
+    ...(
+      Array.isArray(
+        body?.data?.urls
+      )
+        ? body.data.urls
+        : []
+    )
+  ];
+
+  const first =
+    candidates.find(
+      (entry) => {
+        const value =
+          entry?.short_url ||
+          entry?.shortUrl ||
+          entry?.url ||
+          null;
+
+        return (
+          typeof value === "string" &&
+          value.startsWith(
+            "https://meli.la/"
+          )
+        );
+      }
+    ) ||
+    null;
+
+  const directShortUrl =
+    body?.short_url ||
+    body?.shortUrl ||
+    body?.data?.short_url ||
+    body?.data?.shortUrl ||
+    null;
+
+  const shortUrl =
+    first
+      ? (
+          first.short_url ||
+          first.shortUrl ||
+          first.url
+        )
+      : (
+          typeof directShortUrl === "string" &&
+          directShortUrl.startsWith(
+            "https://meli.la/"
+          )
+            ? directShortUrl
+            : null
+        );
+
+  if (!shortUrl) {
+    const safeEntries =
+      candidates
+        .slice(
+          0,
+          3
+        )
+        .map(
+          (entry) => ({
+            id:
+              entry?.id ||
+              null,
+
+            created:
+              entry?.created ??
+              null,
+
+            hasShortUrl:
+              Boolean(
+                entry?.short_url ||
+                entry?.shortUrl
+              ),
+
+            typeUrl:
+              entry?.type_url ||
+              null,
+
+            error:
+              entry?.error ||
+              entry?.message ||
+              null
+          })
+        );
+
+    const diagnostic =
+      JSON.stringify({
+        httpStatus:
+          response.status,
+
+        responseStatus:
+          body?.status ??
+          null,
+
+        totalSuccess:
+          body?.total_success ??
+          body?.totalSuccess ??
+          null,
+
+        totalError:
+          body?.total_error ??
+          body?.totalError ??
+          null,
+
+        canonicalMode:
+          canonical.mode,
+
+        canonicalHttpStatus:
+          canonical.httpStatus,
+
+        targetUrl,
+
+        entries:
+          safeEntries
+      });
+
     throw new Error(
-      "createLink respondeu sem short_url meli.la."
+      `createLink respondeu sem short_url meli.la. Diagnóstico seguro: ${diagnostic}`
     );
   }
 
@@ -271,28 +475,42 @@ export async function createAffiliateLink({
     ok:
       true,
 
-    shortUrl:
-      first.short_url,
+    shortUrl,
 
     originUrl:
-      first.origin_url ||
+      first?.origin_url ||
+      first?.originUrl ||
+      body?.origin_url ||
+      body?.originUrl ||
       null,
 
     generatedTag:
-      first.tag ||
+      first?.tag ||
+      body?.tag ||
       tag,
 
     id:
-      first.id ||
+      first?.id ||
+      body?.id ||
       null,
 
     totalSuccess:
       body?.total_success ??
+      body?.totalSuccess ??
       null,
 
     totalError:
       body?.total_error ??
+      body?.totalError ??
       null,
+
+    canonicalResolution: {
+      mode:
+        canonical.mode,
+
+      httpStatus:
+        canonical.httpStatus
+    },
 
     requestPayload: {
       // Mantemos somente campos não secretos para diagnóstico.

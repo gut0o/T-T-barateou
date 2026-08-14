@@ -1,81 +1,84 @@
-# Correção 6.8C — diagnóstico + fallback público
+# T&T Barateou — Etapa 6.8D
 
-## Limite do Vercel
+## Limite Vercel
 
-Nenhuma função nova:
+Nenhuma Serverless Function nova.
 
 ```text
-10 / 12 Serverless Functions
+10 usadas
+12 permitidas
+2 vagas
 ```
 
-## Por que esta correção
+## Alteração
 
-O `/highlights` encontrou os mais vendidos, mas os três primeiros
-não conseguiram obter detalhes.
-
-Agora, para ITEM:
+Substitua somente:
 
 ```text
-/items?ids=...
-↓
-tenta COM token
-↓
-se bloquear
-↓
-tenta a mesma consulta SEM Authorization
-```
-
-Também mostramos o código retornado em cada tentativa.
-
-## Arquivos
-
-Substitua:
-
-```text
-api/discover-bestsellers.js
 lib/ml-bestsellers-enrichment.js
+```
+
+Agora o enriquecimento também entende:
+
+```text
+PRODUCT
+```
+
+Fluxo:
+
+```text
+PRODUCT
+↓
+/products/{PRODUCT_ID}
+↓
+produto de catálogo
+↓
+buy_box_winner
+↓
+item vencedor + preço + categoria + frete
 ```
 
 ## Deploy
 
 ```powershell
 git add .
-git commit -m "Adiciona fallback publico ao enriquecimento"
+git commit -m "Adiciona enriquecimento de produtos de catalogo"
 git push
 ```
 
 ## Teste
 
 ```text
-https://t-t-barateou.vercel.app/api/discover-bestsellers
+https://t-t-barateou.vercel.app/api/discover-bestsellers?categoryId=MLB432825&cb=20260814d
 ```
 
-Procure:
+No ranking atual:
 
 ```text
-directItemRequestMode
+#1 USER_PRODUCT
+#2 PRODUCT
+#3 PRODUCT
 ```
 
-Se o fallback funcionar:
+Se os PRODUCT forem acessíveis, esperamos aproximadamente:
 
 ```text
-enrichedResolvedCount > 0
+enrichedResolvedCount: 2
 ```
 
-Se continuar bloqueado, cada ITEM não resolvido terá:
+Nos candidatos #2 e #3 queremos ver:
 
-```json
-"itemApiDiagnostic": {
-  "authorized": {
-    "code": 403,
-    "message": "..."
-  },
-  "public": {
-    "code": 403,
-    "message": "..."
-  }
-}
+```text
+sourceType: PRODUCT
+resolved: true
+resolutionType: catalog_product_with_buy_box
+title
+price
+image
+permalink
+categoryId
+domainId
+itemId
 ```
 
-Com isso sabemos exatamente qual caminho ainda está acessível,
-sem criar endpoints novos e sem adivinhar.
+Ainda não gera link afiliado e não envia WhatsApp.

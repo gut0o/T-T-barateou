@@ -10,6 +10,242 @@ import {
   enrichBestSellerCandidates
 } from "../lib/ml-bestsellers-enrichment.js";
 
+import {
+  enrichOfferCategoryAndCommission
+} from "../lib/ml-offer-category-enrichment.js";
+
+import {
+  calculateOfferScore
+} from "../lib/offer-scoring.js";
+
+import {
+  routeToTtCategory
+} from "../lib/tt-category-routing.js";
+
+
+const PRODUCT_SCAN_LIMIT = 5;
+
+function estimateCommissionValue(
+  price,
+  percent
+) {
+  if (
+    typeof price !== "number" ||
+    !Number.isFinite(price) ||
+    typeof percent !== "number" ||
+    !Number.isFinite(percent)
+  ) {
+    return null;
+  }
+
+  return Number(
+    (
+      price *
+      (percent / 100)
+    ).toFixed(2)
+  );
+}
+
+function priorityWeight(
+  priority
+) {
+  if (priority === "high") {
+    return 3;
+  }
+
+  if (priority === "medium") {
+    return 2;
+  }
+
+  if (priority === "low") {
+    return 1;
+  }
+
+  return 0;
+}
+
+async function buildAnalyzedCandidate({
+  candidate,
+  accessToken
+}) {
+  if (
+    !candidate ||
+    candidate.resolved !== true
+  ) {
+    return {
+      ...candidate,
+      analysisStatus:
+        "not_analyzed_unresolved"
+    };
+  }
+
+  const category =
+    await enrichOfferCategoryAndCommission({
+      categoryId:
+        candidate.categoryId ||
+        null,
+
+      categoryName:
+        null,
+
+      domainId:
+        candidate.domainId ||
+        null,
+
+      title:
+        candidate.title ||
+        null,
+
+      accessToken
+    });
+
+  const estimatedDirectCommission =
+    estimateCommissionValue(
+      candidate.price,
+      category
+        .directCommissionPercent
+    );
+
+  const estimatedIndirectCommission =
+    estimateCommissionValue(
+      candidate.price,
+      category
+        .indirectCommissionPercent
+    );
+
+  const scoring =
+    calculateOfferScore({
+      discount:
+        candidate.discount,
+
+      directCommissionPercent:
+        category
+          .directCommissionPercent,
+
+      estimatedDirectCommission
+    });
+
+  const routing =
+    routeToTtCategory({
+      rootCategory:
+        category.rootCategory
+    });
+
+  const hasCoreOfferData =
+    Boolean(
+      candidate.title &&
+      candidate.image &&
+      typeof candidate.price === "number"
+    );
+
+  return {
+    ...candidate,
+
+    analysisStatus:
+      "analyzed",
+
+    rootCategory:
+      category.rootCategory,
+
+    categoryPath:
+      category.categoryPath,
+
+    resolvedCategoryId:
+      category.categoryId,
+
+    resolvedCategoryName:
+      category.categoryName,
+
+    commissionKnown:
+      category.commissionKnown,
+
+    directCommissionPercent:
+      category
+        .directCommissionPercent,
+
+    indirectCommissionPercent:
+      category
+        .indirectCommissionPercent,
+
+    estimatedDirectCommission,
+
+    estimatedIndirectCommission,
+
+    offerScore:
+      scoring.offerScore,
+
+    priority:
+      scoring.priority,
+
+    scoreStatus:
+      scoring.scoreStatus,
+
+    scoreBreakdown:
+      scoring.scoreBreakdown,
+
+    scoreVersion:
+      scoring.scoreVersion,
+
+    ttCategoryId:
+      routing.ttCategoryId,
+
+    ttCategoryName:
+      routing.ttCategoryName,
+
+    ttCategoryEmoji:
+      routing.ttCategoryEmoji,
+
+    ttRoutingKnown:
+      routing.ttRoutingKnown,
+
+    automationReadiness:
+      hasCoreOfferData
+        ? "ready_for_next_stage"
+        : "needs_more_data"
+  };
+}
+
+function sortShortlist(
+  candidates
+) {
+  return candidates
+    .slice()
+    .sort(
+      (a, b) => {
+        const priorityDiff =
+          priorityWeight(
+            b.priority
+          ) -
+          priorityWeight(
+            a.priority
+          );
+
+        if (priorityDiff) {
+          return priorityDiff;
+        }
+
+        const aScore =
+          typeof a.offerScore === "number"
+            ? a.offerScore
+            : -1;
+
+        const bScore =
+          typeof b.offerScore === "number"
+            ? b.offerScore
+            : -1;
+
+        if (bScore !== aScore) {
+          return bScore - aScore;
+        }
+
+        return (
+          (a.rank ?? 999) -
+          (b.rank ?? 999)
+        );
+      }
+    );
+}
+
 export default async function handler(
   req,
   res
@@ -68,6 +304,22 @@ export default async function handler(
         );
     }
 
+    // Nossa credencial já mostrou que ITEM e USER_PRODUCT
+    // estão bloqueados para leitura de detalhes.
+    // Em vez de gastar chamadas nesses tipos, percorremos o top 20
+    // e selecionamos os primeiros PRODUCTs acessíveis.
+    const productCandidates =
+      result.candidates
+        .filter(
+          (candidate) =>
+            candidate?.type ===
+            "PRODUCT"
+        )
+        .slice(
+          0,
+          PRODUCT_SCAN_LIMIT
+        );
+
     const enrichment =
       await enrichBestSellerCandidates({
         accessToken:
@@ -75,25 +327,61 @@ export default async function handler(
             .access_token,
 
         candidates:
-          result.candidates,
+          productCandidates,
 
         limit:
-          3
+          PRODUCT_SCAN_LIMIT
       });
+
+    const analyzedCandidates =
+      [];
+
+    for (
+      const candidate of
+      enrichment.candidates
+    ) {
+      analyzedCandidates.push(
+        await buildAnalyzedCandidate({
+          candidate,
+          accessToken:
+            tokenData
+              .access_token
+        })
+      );
+    }
+
+    const readyCandidates =
+      analyzedCandidates.filter(
+        (candidate) =>
+          candidate
+            .automationReadiness ===
+          "ready_for_next_stage"
+      );
+
+    const shortlist =
+      sortShortlist(
+        readyCandidates
+      );
 
     return res
       .status(200)
       .json({
         ...result,
 
+        discoveryStrategy:
+          "top20_then_first_5_catalog_products",
+
+        scannedHighlightCount:
+          result.candidates.length,
+
+        selectedProductCount:
+          productCandidates.length,
+
         enrichmentLimit:
-          3,
+          PRODUCT_SCAN_LIMIT,
 
         enrichedCandidateCount:
           enrichment.requested,
-
-        directItemRequestMode:
-          enrichment.directItemRequestMode,
 
         enrichedResolvedCount:
           enrichment.resolvedCount,
@@ -101,16 +389,28 @@ export default async function handler(
         enrichedUnresolvedCount:
           enrichment.unresolvedCount,
 
-        enrichedCandidates:
-          enrichment.candidates,
+        analyzedCandidateCount:
+          analyzedCandidates.length,
 
-        enrichmentStatus:
-          enrichment.resolvedCount > 0
-            ? "details_found"
-            : "details_unavailable",
+        readyCandidateCount:
+          readyCandidates.length,
+
+        analyzedCandidates,
+
+        shortlist,
+
+        shortlistStatus:
+          shortlist.length > 0
+            ? "offers_ready_for_next_stage"
+            : "no_ready_offers",
+
+        nextStage:
+          shortlist.length > 0
+            ? "affiliate_link_generation"
+            : "try_another_leaf_category",
 
         note:
-          "Os 20 mais vendidos continuam sendo retornados, mas somente os 3 primeiros são enriquecidos nesta etapa para manter a execução leve."
+          "O T&T agora procura PRODUCTs no top 20, tenta obter uma publicação representativa, calcula categoria, comissão, score e categoria T&T e devolve uma shortlist. Nada é publicado automaticamente."
       });
   } catch (error) {
     return res

@@ -1,177 +1,77 @@
-# T&T Barateou — Pacote acelerado 6.11A → 6.11D
+# T&T Barateou — Fix 6.11
 
-Nenhuma nova Serverless Function.
+## Problema
 
-```text
-10 usadas
-12 permitidas
-2 vagas livres
-```
-
-## O que entra neste pacote
-
-### 6.11A — Importação em lote
-
-Agora você pode mandar:
-
-```json
-{
-  "affiliateLinks": [
-    "https://meli.la/...",
-    "https://meli.la/..."
-  ]
-}
-```
-
-Limite atual:
+A importação em lote retornava:
 
 ```text
-10 links por chamada
+401
+Protected deployment
 ```
 
-### 6.11B — Resolve tudo automaticamente
+Os links afiliados estavam corretos.
 
-Para cada link:
+O problema era a chamada interna para:
 
 ```text
-meli.la
-→ /api/offer
-→ itemId
-→ productId
-→ título
-→ preço
-→ imagem
-→ categoria T&T
-→ score
-→ priority
+/api/offer
 ```
 
-Não precisa informar itemId manualmente.
-
-### 6.11C — Regra automática de aprovação
+usar primeiro:
 
 ```text
-high
-medium
-→ ready_to_publish
-
-low
-unknown
-→ held
+VERCEL_URL
 ```
 
-Oferta `held` NÃO entra na fila de publicação.
+Essa variável pode apontar para a URL única do deployment, protegida pelo Vercel.
 
-### 6.11D — Fila + mensagem final + WhatsApp payload
+## Correção
 
-Se aprovada:
+Agora a ordem é:
 
 ```text
-fila
-→ affiliateLinkStatus: verified
-→ publicationStatus: ready_to_publish
-→ placeholder substituído
-→ whatsappPayload criado
+TT_PUBLIC_BASE_URL
+↓
+VERCEL_PROJECT_PRODUCTION_URL
+↓
+VERCEL_URL (último fallback)
 ```
 
-Se o item já estiver na fila:
+Na configuração atual, o esperado é usar automaticamente:
 
 ```text
-alreadyQueued: true
+VERCEL_PROJECT_PRODUCTION_URL
 ```
 
-e ele é atualizado em vez de duplicado.
+que deve apontar para o domínio público de produção.
 
-## Arquivos
+## Arquivo
 
 Substitua somente:
 
 ```text
-api/discover-bestsellers.js
 lib/tt-queue-admin-actions.js
 ```
-
-Não precisa alterar as outras libs da etapa 6.10.
 
 ## Deploy
 
 ```powershell
 git add .
-git commit -m "Adiciona importacao em lote de links afiliados"
+git commit -m "Corrige URL publica nas chamadas internas"
 git push
 ```
 
-## Segurança
+## Opcional
 
-Use a TT_QUEUE_ADMIN_KEY NOVA/ROTACIONADA.
+Não é necessário criar outra variável se `VERCEL_PROJECT_PRODUCTION_URL`
+estiver exposta pelo Vercel.
 
-Não use novamente uma chave que já tenha sido compartilhada em chat ou log.
-
-## Teste com os dois links atuais
-
-```powershell
-$TTKEY = "SUA_CHAVE_NOVA"
-
-$headers = @{
-  "x-tt-admin-key" = $TTKEY
-}
-
-$body = @{
-  action = "ingest-affiliate-links"
-  affiliateLinks = @(
-    "https://meli.la/2dEmkZq",
-    "https://meli.la/2E9Wmu7"
-  )
-} | ConvertTo-Json
-
-Invoke-RestMethod `
-  -Method POST `
-  -Uri "https://t-t-barateou.vercel.app/api/discover-bestsellers?action=ingest-affiliate-links" `
-  -Headers $headers `
-  -ContentType "application/json" `
-  -Body $body |
-  ConvertTo-Json -Depth 12
-```
-
-## Resultado esperado com os dados que já vimos
-
-Bicicleta:
+Mas, se quisermos fixar explicitamente a URL no futuro, podemos criar:
 
 ```text
-priority: medium
-status: ready_to_publish
-queued: true
-whatsappPayload: preenchido
+TT_PUBLIC_BASE_URL=https://t-t-barateou.vercel.app
 ```
 
-Espelho:
+## Reteste
 
-```text
-priority: low
-status: held
-queued: false
-heldReason: low_priority
-```
-
-## Depois deste pacote
-
-O fluxo manual de teste fica:
-
-```text
-colar links afiliados
-→ sistema resolve sozinho
-→ sistema decide sozinho
-→ sistema cria mensagem
-→ sistema coloca só as boas na fila
-→ payload WhatsApp pronto
-```
-
-O próximo bloco pode conectar:
-
-```text
-ready_to_publish
-→ bot Baileys
-→ categoria T&T
-→ preview
-→ enviado / erro / retry
-```
+Use exatamente o mesmo teste dos dois links da etapa 6.11.

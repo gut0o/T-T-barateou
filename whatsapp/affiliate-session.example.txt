@@ -1,0 +1,12 @@
+# COPIE ESTE ARQUIVO SOMENTE COMO REFERÊNCIA.
+# Não coloque valores reais aqui se este arquivo for versionado.
+
+# Sessão local da Central de Afiliados.
+# Valores obtidos da requisição createLink no navegador.
+ML_AFFILIATE_COOKIE=
+ML_AFFILIATE_CSRF_TOKEN=
+ML_AFFILIATE_TAG=
+
+# Opcional:
+TT_AUTO_AFFILIATE=true
+TT_AUTO_AFFILIATE_INTERVAL_MS=30000

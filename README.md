@@ -1,192 +1,60 @@
-# T&T Barateou — Pacote acelerado 6.13A → 6.13E
+# T&T Barateou — Pacote 6.14
 
-Objetivo: deixar o sistema praticamente operando sozinho hoje.
+## Objetivo
 
-## Limite Vercel
-
-Nenhuma Serverless Function nova.
+Eliminar o último passo manual:
 
 ```text
-10 usadas
-12 permitidas
-2 vagas livres
-```
-
----
-
-# 1. Prévia duplicada corrigida
-
-Antes:
-
-```text
-SIM
-↓
-pending era liberado cedo demais
-↓
-poll podia enxergar ready_to_publish de novo
-↓
-segunda prévia
-```
-
-Agora:
-
-```text
-SIM
-↓
-actionInProgress = true
-↓
-backend muda para sending
-↓
-só então a prévia é liberada
-```
-
-O polling fica bloqueado durante a transição.
-
----
-
-# 2. Descoberta automática em várias categorias
-
-O bot agora usa uma rotação inicial:
-
-```text
-Vestidos
-Ares Condicionados
-Suplementos Alimentares
-Geladeiras de Brinquedo
-```
-
-Config:
-
-```text
-lib/tt-discovery-seeds.js
-```
-
-Cada execução consulta no máximo 2 categorias.
-
-Se uma categoria não tiver ranking disponível, as outras continuam.
-
-Por padrão:
-
-```text
-auto discovery = ligada
-intervalo = 15 minutos
-```
-
-Variáveis opcionais:
-
-```powershell
-$env:TT_AUTO_DISCOVERY = "true"
-$env:TT_AUTO_DISCOVERY_INTERVAL_MS = "900000"
-```
-
----
-
-# 3. Ofertas descobertas entram sozinhas na fila
-
-Fluxo:
-
-```text
-auto-discover
-→ highlights
-→ PRODUCT
-→ preço/imagem
-→ comissão
-→ score
-→ categoria T&T
-→ high/medium
-→ awaiting_affiliate_link
-```
-
-Se o item já existe na fila:
-
-```text
-não duplica
-```
-
-Isso inclui:
-
-```text
-sent
-ready_to_publish
-awaiting_affiliate_link
-rejected
-...
-```
-
----
-
-# 4. O Aggin vira painel de controle
-
-Comandos:
-
-```text
-STATUS
-DESCOBRIR
-```
-
-## STATUS
-
-Mostra:
-
-```text
-aguardando link
-prontas
-enviando
-enviadas
-erros
-rejeitadas
-```
-
-E lista algumas ofertas que precisam de link afiliado.
-
-## DESCOBRIR
-
-Força uma busca agora, sem esperar os 15 minutos.
-
----
-
-# 5. Link afiliado direto pelo WhatsApp
-
-Agora não precisa mais PowerShell para ingestão.
-
-Quando o bot avisar uma oferta:
-
-```text
-🔎 Abrir produto: ...
-```
-
-Abra, gere o link afiliado e simplesmente cole no Aggin:
-
-```text
-https://meli.la/...
-```
-
-O bot faz:
-
-```text
-meli.la
-→ /api/offer
-→ score
-→ high/medium
-→ atualiza/cria fila
-→ ready_to_publish
-→ abre prévia
+descoberta
+→ geração automática do meli.la
+→ validação
+→ preview
 → SIM
-→ envia
-→ sent
+→ WhatsApp
 ```
 
-Se for low:
+## Importante
+
+O endpoint observado:
 
 ```text
-held
+POST https://www.mercadolivre.com.br/affiliate-program/api/v2/affiliates/createLink
 ```
 
-e ele avisa no Aggin.
+é um endpoint interno da interface do Mercado Livre.
+
+Não é uma API pública/documentada.
+
+Ele pode:
+- mudar;
+- exigir uma sessão válida;
+- parar de funcionar;
+- ter regras do programa que precisam ser respeitadas.
+
+Por isso a integração fica LOCAL e isolada.
+
+---
+
+# Segurança
+
+NÃO coloque no Vercel:
+
+```text
+ML_AFFILIATE_COOKIE
+ML_AFFILIATE_CSRF_TOKEN
+```
+
+NÃO coloque no Git.
+
+NÃO mande esses valores no ChatGPT.
+
+Eles ficam apenas na sessão local do PowerShell que roda o Baileys.
 
 ---
 
 # Arquivos
+
+Este pacote é autocontido em relação à 6.13.
 
 Substitua:
 
@@ -196,29 +64,24 @@ api/discover-bestsellers.js
 lib/tt-queue-admin-actions.js
 lib/tt-pending-publication-store.js
 lib/tt-publication-planner.js
+lib/tt-discovery-seeds.js
 
 whatsapp/publish-queue.js
+whatsapp/group-routing.json
 ```
 
 Adicione:
 
 ```text
-lib/tt-discovery-seeds.js
+whatsapp/ml-affiliate-link.js
+whatsapp/affiliate-session.example.txt
 ```
-
-`group-routing.json` está incluído, mas permanece:
-
-```json
-"testMode": true
-```
-
-Então ainda usamos somente o Aggin.
 
 ---
 
 # Deploy
 
-Pare o bot:
+Primeiro pare o bot:
 
 ```text
 Ctrl + C
@@ -228,7 +91,7 @@ Depois:
 
 ```powershell
 git add .
-git commit -m "Automatiza descoberta e controle pelo WhatsApp"
+git commit -m "Automatiza geracao local de link afiliado"
 git push
 ```
 
@@ -236,116 +99,191 @@ Espere o Vercel ficar Ready.
 
 ---
 
-# Iniciar
+# Configurar a sessão LOCAL
 
-A variável local continua:
+No DevTools, use a requisição:
 
-```powershell
-$env:TT_QUEUE_ADMIN_KEY = "SUA_CHAVE_ATUAL"
+```text
+createLink
 ```
 
-Depois:
+Em Request Headers você já identificou:
+
+```text
+Cookie
+X-Csrf-Token
+```
+
+E no Payload existe:
+
+```text
+tag
+```
+
+No PowerShell, SEM mandar os valores para ninguém:
+
+```powershell
+$env:ML_AFFILIATE_COOKIE = 'COLE_LOCALMENTE_O_COOKIE_COMPLETO'
+$env:ML_AFFILIATE_CSRF_TOKEN = 'COLE_LOCALMENTE_O_VALOR_DE_X-Csrf-Token'
+$env:ML_AFFILIATE_TAG = 'COLE_LOCALMENTE_O_TAG_DO_PAYLOAD'
+```
+
+A TT_QUEUE_ADMIN_KEY continua:
+
+```powershell
+$env:TT_QUEUE_ADMIN_KEY = 'SUA_CHAVE_ATUAL'
+```
+
+Não use `setx` por enquanto.
+Assim, os cookies desaparecem quando a janela do PowerShell é encerrada.
+
+---
+
+# Iniciar
 
 ```powershell
 node whatsapp\publish-queue.js
 ```
 
-O terminal deve mostrar:
+Queremos ver:
 
 ```text
-🔎 Auto discovery: SIM
-💬 Comandos no Aggin: STATUS | DESCOBRIR | cole um meli.la
+🔗 Auto affiliate: SIM
+🔗 Sessão afiliado local: CONFIGURADA
 ```
 
 ---
 
-# TESTE 1
+# Fluxo automático
 
-No Aggin envie:
+Quando houver:
 
 ```text
-STATUS
+awaiting_affiliate_link
 ```
 
-O bot deve devolver o estado da fila.
-
----
-
-# TESTE 2
-
-No Aggin envie:
+o bot faz localmente:
 
 ```text
-DESCOBRIR
-```
-
-Ele consulta duas categorias da rotação.
-
-Se houver novas high/medium, o Aggin recebe algo como:
-
-```text
-🔎 T&T encontrou 2 oferta(s) nova(s)
-
-1. Produto...
-💰 R$ ...
-📂 Moda & Beleza
-🔎 Abrir produto: https://www.mercadolivre.com.br/p/MLB...
-
-Depois gere o link de afiliado e cole o meli.la aqui no Aggin.
-```
-
----
-
-# TESTE 3
-
-Cole no Aggin um link:
-
-```text
+itemId
+productId
+↓
+POST createLink
+↓
+Cookie + X-Csrf-Token
+↓
+short_url
+↓
 https://meli.la/...
 ```
 
-O bot responde com o resultado.
+Depois chama o backend:
 
-Se aprovado:
+```text
+attach-affiliate-link
+```
+
+O backend continua validando se o link corresponde ao item/produto esperado.
+
+Se validar:
 
 ```text
 ready_to_publish
-↓
-prévia
-↓
-SIM
-↓
-sent
+```
+
+e o Aggin recebe:
+
+```text
+🔗 LINK AFILIADO GERADO AUTOMATICAMENTE
+...
+✅ Validado e movido para ready_to_publish.
+```
+
+Logo depois aparece a prévia.
+
+---
+
+# Teste recomendado
+
+Já temos itens antigos na fila `awaiting_affiliate_link`.
+
+Então basta iniciar:
+
+```powershell
+node whatsapp\publish-queue.js
+```
+
+Não precisa enviar nada no Aggin.
+
+Em até ~30 segundos o bot deve tentar gerar um link automaticamente.
+
+No terminal:
+
+```text
+🔗 Gerando link afiliado: ...
+🔗 Link gerado: https://meli.la/...
+```
+
+No Aggin:
+
+```text
+🔗 LINK AFILIADO GERADO AUTOMATICAMENTE
+...
+```
+
+e depois:
+
+```text
+🧪 FILA T&T - PRÉVIA
 ```
 
 ---
 
-# O que ainda falta para 100% autônomo
+# Se a sessão expirar
 
-Só a geração do próprio link afiliado.
-
-Hoje o sistema já consegue sozinho:
+Se Mercado Livre responder 401/403:
 
 ```text
-buscar
-analisar
-selecionar
-não duplicar
-organizar fila
-pedir link
-receber link pelo WhatsApp
-validar
-montar anúncio
-pedir confirmação
-publicar
-registrar sent/error/retry
+⚠️ AUTOMAÇÃO DO LINK AFILIADO PAROU
 ```
 
-Enquanto o link afiliado precisar ser gerado pelas ferramentas do Mercado Livre,
-o único trabalho manual fica sendo:
+O bot NÃO perde a oferta.
+
+Ela permanece:
 
 ```text
-abrir produto
-→ gerar link
-→ colar no Aggin
+awaiting_affiliate_link
 ```
+
+Você apenas:
+1. abre novamente a Central de Afiliados;
+2. gera um link manual uma vez;
+3. copia novos Cookie e X-Csrf-Token para o PowerShell;
+4. reinicia o bot.
+
+---
+
+# Estado final esperado
+
+Com a sessão válida:
+
+```text
+T&T procura sozinho
+→ escolhe sozinho
+→ calcula score
+→ evita duplicata
+→ gera link afiliado sozinho
+→ valida link
+→ monta anúncio
+→ pede SIM
+→ envia
+→ registra sent
+```
+
+Por enquanto:
+
+```json
+"testMode": true
+```
+
+Então a publicação continua somente no Aggin.

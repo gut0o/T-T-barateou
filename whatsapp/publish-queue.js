@@ -11,6 +11,14 @@ import makeWASocket, {
   useMultiFileAuthState
 } from "@whiskeysockets/baileys";
 
+
+import {
+  AffiliateSessionError,
+  affiliateSessionConfigured,
+  affiliateSessionStatus,
+  createAffiliateLink
+} from "./ml-affiliate-link.js";
+
 const __filename =
   fileURLToPath(
     import.meta.url
@@ -82,6 +90,35 @@ const AUTO_DISCOVERY_INTERVAL_MS =
 
 let discoveryCursor =
   0;
+
+const AUTO_AFFILIATE_ENABLED =
+  String(
+    process.env
+      .TT_AUTO_AFFILIATE ||
+    "true"
+  )
+    .trim()
+    .toLowerCase() !==
+  "false";
+
+const AUTO_AFFILIATE_INTERVAL_MS =
+  Math.max(
+    Number(
+      process.env
+        .TT_AUTO_AFFILIATE_INTERVAL_MS ||
+      30000
+    ) || 30000,
+    10000
+  );
+
+let affiliateFillInProgress =
+  false;
+
+let affiliateSessionBlocked =
+  false;
+
+let affiliateSessionWarningSent =
+  false;
 
 const logger =
   P({
@@ -521,6 +558,41 @@ async function getQueueSummary() {
   });
 }
 
+
+async function getAwaitingAffiliateItem() {
+  const response =
+    await apiGet({
+      action:
+        "queue-list",
+
+      status:
+        "awaiting_affiliate_link",
+
+      limit:
+        1
+    });
+
+  return (
+    response
+      ?.queue
+      ?.entries?.[0] ||
+    null
+  );
+}
+
+async function attachAffiliateLink({
+  itemId,
+  affiliateLink
+}) {
+  return apiPost(
+    "attach-affiliate-link",
+    {
+      itemId,
+      affiliateLink
+    }
+  );
+}
+
 async function runAutoDiscovery() {
   const result =
     await apiPost(
@@ -680,6 +752,163 @@ function previewCaption(
   return lines.join(
     "\n"
   );
+}
+
+async function notifyAffiliateSessionProblem(
+  sock,
+  message
+) {
+  if (
+    affiliateSessionWarningSent
+  ) {
+    return;
+  }
+
+  affiliateSessionWarningSent =
+    true;
+
+  await sock.sendMessage(
+    routing
+      .controlGroup
+      .jid,
+    {
+      text:
+        "⚠️ *AUTOMAÇÃO DO LINK AFILIADO PAROU*\n\n" +
+        `${message}\n\n` +
+        "Atualize localmente ML_AFFILIATE_COOKIE e ML_AFFILIATE_CSRF_TOKEN e reinicie o bot.\n\n" +
+        "As ofertas continuam seguras na fila aguardando link."
+    }
+  );
+}
+
+async function fillNextAffiliateLink(
+  sock
+) {
+  if (
+    !AUTO_AFFILIATE_ENABLED ||
+    affiliateFillInProgress ||
+    affiliateSessionBlocked
+  ) {
+    return;
+  }
+
+  if (
+    !affiliateSessionConfigured()
+  ) {
+    return;
+  }
+
+  affiliateFillInProgress =
+    true;
+
+  try {
+    const entry =
+      await getAwaitingAffiliateItem();
+
+    if (!entry) {
+      return;
+    }
+
+    console.log(
+      `🔗 Gerando link afiliado: ${entry.title}`
+    );
+
+    const generated =
+      await createAffiliateLink({
+        itemId:
+          entry.itemId,
+
+        productId:
+          entry.productId,
+
+        catalogPageUrl:
+          entry.catalogPageUrl
+      });
+
+    console.log(
+      `🔗 Link gerado: ${generated.shortUrl}`
+    );
+
+    const attached =
+      await attachAffiliateLink({
+        itemId:
+          entry.itemId,
+
+        affiliateLink:
+          generated.shortUrl
+      });
+
+    if (
+      attached?.ok !== true ||
+      attached
+        ?.publicationStatus !==
+        "ready_to_publish"
+    ) {
+      throw new Error(
+        attached?.error ||
+        "O link foi gerado, mas não passou pela validação do T&T."
+      );
+    }
+
+    await sock.sendMessage(
+      routing
+        .controlGroup
+        .jid,
+      {
+        text:
+          "🔗 *LINK AFILIADO GERADO AUTOMATICAMENTE*\n\n" +
+          `${entry.title}\n` +
+          `${generated.shortUrl}\n\n` +
+          "✅ Validado e movido para ready_to_publish."
+      }
+    );
+
+    // Não esperamos o próximo poll.
+    await showNextPreview(
+      sock
+    );
+  } catch (error) {
+    if (
+      error instanceof
+        AffiliateSessionError
+    ) {
+      affiliateSessionBlocked =
+        true;
+
+      console.error(
+        "⚠️ Sessão de afiliados inválida:",
+        error.message
+      );
+
+      await notifyAffiliateSessionProblem(
+        sock,
+        error.message
+      );
+
+      return;
+    }
+
+    console.error(
+      "Erro ao gerar link afiliado:",
+      error?.message ||
+      error
+    );
+
+    await sock.sendMessage(
+      routing
+        .controlGroup
+        .jid,
+      {
+        text:
+          "❌ Não consegui gerar/validar o link afiliado para uma oferta.\n\n" +
+          `${error?.message || "Erro desconhecido."}\n\n` +
+          "A oferta permaneceu aguardando link."
+      }
+    );
+  } finally {
+    affiliateFillInProgress =
+      false;
+  }
 }
 
 async function sendQueueSummary(
@@ -858,6 +1087,16 @@ async function triggerAutoDiscovery(
       sock,
       result
     );
+
+    if (
+      AUTO_AFFILIATE_ENABLED &&
+      affiliateSessionConfigured() &&
+      !affiliateSessionBlocked
+    ) {
+      await fillNextAffiliateLink(
+        sock
+      );
+    }
   } catch (error) {
     console.error(
       "Erro na descoberta automática:",
@@ -1436,6 +1675,27 @@ async function start() {
               : "🔎 Discovery interval: desligado"
           );
           console.log(
+            `🔗 Auto affiliate: ${AUTO_AFFILIATE_ENABLED ? "SIM" : "NÃO"}`
+          );
+
+          const affiliateStatus =
+            affiliateSessionStatus();
+
+          console.log(
+            affiliateStatus.configured
+              ? "🔗 Sessão afiliado local: CONFIGURADA"
+              : "🔗 Sessão afiliado local: NÃO CONFIGURADA"
+          );
+
+          if (
+            AUTO_AFFILIATE_ENABLED &&
+            affiliateStatus.configured
+          ) {
+            console.log(
+              `🔗 Affiliate interval: ${AUTO_AFFILIATE_INTERVAL_MS} ms`
+            );
+          }
+          console.log(
             "💬 Comandos no Aggin: STATUS | DESCOBRIR | cole um meli.la"
           );
           console.log(
@@ -1450,6 +1710,18 @@ async function start() {
             AUTO_DISCOVERY_ENABLED
           ) {
             triggerAutoDiscovery(
+              sock
+            ).catch(
+              console.error
+            );
+          }
+
+
+          if (
+            AUTO_AFFILIATE_ENABLED &&
+            affiliateSessionConfigured()
+          ) {
+            fillNextAffiliateLink(
               sock
             ).catch(
               console.error
@@ -1722,6 +1994,21 @@ async function start() {
         );
       },
       AUTO_DISCOVERY_INTERVAL_MS
+    );
+  }
+
+  if (
+    AUTO_AFFILIATE_ENABLED
+  ) {
+    setInterval(
+      () => {
+        fillNextAffiliateLink(
+          sock
+        ).catch(
+          console.error
+        );
+      },
+      AUTO_AFFILIATE_INTERVAL_MS
     );
   }
 

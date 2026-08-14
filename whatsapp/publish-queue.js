@@ -59,6 +59,30 @@ const POLL_INTERVAL_MS =
     5000
   );
 
+
+const AUTO_DISCOVERY_ENABLED =
+  String(
+    process.env
+      .TT_AUTO_DISCOVERY ||
+    "true"
+  )
+    .trim()
+    .toLowerCase() !==
+  "false";
+
+const AUTO_DISCOVERY_INTERVAL_MS =
+  Math.max(
+    Number(
+      process.env
+        .TT_AUTO_DISCOVERY_INTERVAL_MS ||
+      900000
+    ) || 900000,
+    60000
+  );
+
+let discoveryCursor =
+  0;
+
 const logger =
   P({
     level:
@@ -72,6 +96,11 @@ let pending =
   null;
 
 let polling =
+  false;
+
+// Impede que o polling abra uma segunda prévia enquanto uma
+// confirmação está mudando o status no backend ou enviando mídia.
+let actionInProgress =
   false;
 
 const processedMessageIds =
@@ -136,6 +165,79 @@ function isRetry(text) {
     value === "retry" ||
     value === "tentar novamente" ||
     value === "tenta novamente"
+  );
+}
+
+
+function isStatusCommand(text) {
+  const value =
+    normalizeAnswer(
+      text
+    );
+
+  return (
+    value === "status" ||
+    value === "fila"
+  );
+}
+
+function isDiscoverCommand(text) {
+  const value =
+    normalizeAnswer(
+      text
+    );
+
+  return (
+    value === "descobrir" ||
+    value === "buscar ofertas" ||
+    value === "procurar ofertas"
+  );
+}
+
+function extractAffiliateLinks(text) {
+  const matches =
+    String(text || "")
+      .match(
+        /https?:\/\/(?:meli\.la|(?:www\.)?mercadolivre\.com\.br)\/[^\s<>"']+/gi
+      ) ||
+    [];
+
+  return Array.from(
+    new Set(
+      matches.map(
+        (link) =>
+          link
+            .replace(
+              /[),.;!?]+$/,
+              ""
+            )
+      )
+    )
+  ).slice(
+    0,
+    10
+  );
+}
+
+function formatMoney(value) {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value)
+  ) {
+    return null;
+  }
+
+  return new Intl.NumberFormat(
+    "pt-BR",
+    {
+      style:
+        "currency",
+
+      currency:
+        "BRL"
+    }
+  ).format(
+    value
   );
 }
 
@@ -399,6 +501,51 @@ async function setStatus(
   );
 }
 
+
+async function ingestAffiliateLinks(
+  links
+) {
+  return apiPost(
+    "ingest-affiliate-links",
+    {
+      affiliateLinks:
+        links
+    }
+  );
+}
+
+async function getQueueSummary() {
+  return apiGet({
+    action:
+      "queue-summary"
+  });
+}
+
+async function runAutoDiscovery() {
+  const result =
+    await apiPost(
+      "auto-discover",
+      {
+        cursor:
+          discoveryCursor,
+
+        limit:
+          2
+      }
+    );
+
+  if (
+    typeof result
+      ?.nextCursor ===
+      "number"
+  ) {
+    discoveryCursor =
+      result.nextCursor;
+  }
+
+  return result;
+}
+
 async function getReadyItem() {
   const response =
     await apiGet({
@@ -535,12 +682,301 @@ function previewCaption(
   );
 }
 
+async function sendQueueSummary(
+  sock
+) {
+  try {
+    const summary =
+      await getQueueSummary();
+
+    const counts =
+      summary.counts ||
+      {};
+
+    const lines = [
+      "📊 *T&T - STATUS DA FILA*",
+      "",
+      `⏳ Aguardando link: ${counts.awaiting_affiliate_link || 0}`,
+      `✅ Prontas: ${counts.ready_to_publish || 0}`,
+      `📤 Enviando: ${counts.sending || 0}`,
+      `🟢 Enviadas: ${counts.sent || 0}`,
+      `❌ Erro: ${counts.send_error || 0}`,
+      `🚫 Rejeitadas: ${counts.rejected || 0}`
+    ];
+
+    if (
+      Array.isArray(
+        summary.awaitingAffiliateLinks
+      ) &&
+      summary.awaitingAffiliateLinks.length
+    ) {
+      lines.push(
+        "",
+        "🔗 *Precisam de link afiliado:*"
+      );
+
+      summary.awaitingAffiliateLinks
+        .slice(
+          0,
+          5
+        )
+        .forEach(
+          (offer, index) => {
+            lines.push(
+              "",
+              `${index + 1}. ${offer.title}`,
+              offer.price !== null
+                ? `💰 ${formatMoney(offer.price)}`
+                : "",
+              offer.catalogPageUrl
+                ? `🔎 ${offer.catalogPageUrl}`
+                : ""
+            );
+          }
+        );
+    }
+
+    await sock.sendMessage(
+      routing
+        .controlGroup
+        .jid,
+      {
+        text:
+          lines
+            .filter(
+              (line) =>
+                line !== ""
+                ||
+                true
+            )
+            .join("\n")
+      }
+    );
+  } catch (error) {
+    await sock.sendMessage(
+      routing
+        .controlGroup
+        .jid,
+      {
+        text:
+          "❌ Não consegui consultar o status da fila.\n" +
+          (
+            error?.message ||
+            "Erro desconhecido."
+          )
+      }
+    );
+  }
+}
+
+async function notifyAutoDiscovery(
+  sock,
+  result
+) {
+  const newOffers =
+    Array.isArray(
+      result?.newOffers
+    )
+      ? result.newOffers
+      : [];
+
+  if (!newOffers.length) {
+    console.log(
+      `🔎 Descoberta automática: nenhuma oferta nova. Próximo cursor: ${discoveryCursor}`
+    );
+
+    return;
+  }
+
+  const lines = [
+    `🔎 *T&T encontrou ${newOffers.length} oferta(s) nova(s)*`,
+    "",
+    "Elas passaram pela regra high/medium e estão aguardando link afiliado."
+  ];
+
+  newOffers
+    .slice(
+      0,
+      5
+    )
+    .forEach(
+      (offer, index) => {
+        lines.push(
+          "",
+          `${index + 1}. *${offer.title}*`,
+          offer.price !== null
+            ? `💰 ${formatMoney(offer.price)}`
+            : "",
+          offer.discount !== null
+            ? `🔥 ${offer.discount}% OFF`
+            : "",
+          offer.ttCategoryName
+            ? `📂 ${offer.ttCategoryName}`
+            : "",
+          offer.catalogPageUrl
+            ? `🔎 Abrir produto: ${offer.catalogPageUrl}`
+            : "",
+          "Depois gere o link de afiliado e cole o meli.la aqui no Aggin."
+        );
+      }
+    );
+
+  await sock.sendMessage(
+    routing
+      .controlGroup
+      .jid,
+    {
+      text:
+        lines
+          .filter(
+            (line) =>
+              line !== null
+          )
+          .join("\n")
+    }
+  );
+}
+
+async function triggerAutoDiscovery(
+  sock
+) {
+  if (
+    actionInProgress
+  ) {
+    return;
+  }
+
+  try {
+    console.log(
+      `🔎 Descoberta automática iniciada. Cursor: ${discoveryCursor}`
+    );
+
+    const result =
+      await runAutoDiscovery();
+
+    await notifyAutoDiscovery(
+      sock,
+      result
+    );
+  } catch (error) {
+    console.error(
+      "Erro na descoberta automática:",
+      error?.message ||
+      error
+    );
+  }
+}
+
+async function handleAffiliateLinksFromControl(
+  sock,
+  links
+) {
+  if (!links.length) {
+    return;
+  }
+
+  try {
+    await sock.sendMessage(
+      routing
+        .controlGroup
+        .jid,
+      {
+        text:
+          `🔗 Processando ${links.length} link(s) afiliado(s)...`
+      }
+    );
+
+    const result =
+      await ingestAffiliateLinks(
+        links
+      );
+
+    const lines = [
+      "🔗 *RESULTADO DOS LINKS*",
+      "",
+      `✅ Prontas: ${result.readyCount || 0}`,
+      `⏸️ Seguradas: ${result.heldCount || 0}`,
+      `❌ Falhas: ${result.failedCount || 0}`
+    ];
+
+    for (
+      const item of
+      result.results ||
+      []
+    ) {
+      lines.push(
+        "",
+        `• ${item.title || item.affiliateLink}`
+      );
+
+      if (
+        item.status ===
+        "ready_to_publish"
+      ) {
+        lines.push(
+          `✅ ${item.priority || ""} → pronta para publicação`
+        );
+      } else if (
+        item.status ===
+        "held"
+      ) {
+        lines.push(
+          `⏸️ ${item.priority || ""} → ${item.heldReason || "segurada"}`
+        );
+      } else {
+        lines.push(
+          `❌ ${item.error || item.reason || item.status || "falha"}`
+        );
+      }
+    }
+
+    await sock.sendMessage(
+      routing
+        .controlGroup
+        .jid,
+      {
+        text:
+          lines.join(
+            "\n"
+          )
+      }
+    );
+
+    // Se alguma ficou pronta, não esperamos o próximo poll.
+    if (
+      Number(
+        result.readyCount ||
+        0
+      ) > 0
+    ) {
+      await showNextPreview(
+        sock
+      );
+    }
+  } catch (error) {
+    await sock.sendMessage(
+      routing
+        .controlGroup
+        .jid,
+      {
+        text:
+          "❌ Erro ao processar link afiliado.\n" +
+          (
+            error?.message ||
+            "Erro desconhecido."
+          )
+      }
+    );
+  }
+}
+
 async function showNextPreview(
   sock
 ) {
   if (
     pending ||
-    polling
+    polling ||
+    actionInProgress
   ) {
     return;
   }
@@ -613,8 +1049,8 @@ async function rejectPending(
     return;
   }
 
-  pending =
-    null;
+  actionInProgress =
+    true;
 
   try {
     await setStatus(
@@ -650,6 +1086,12 @@ async function rejectPending(
       error?.message ||
       error
     );
+  } finally {
+    pending =
+      null;
+
+    actionInProgress =
+      false;
   }
 }
 
@@ -664,10 +1106,13 @@ async function sendPending(
     return;
   }
 
-  pending =
-    null;
+  actionInProgress =
+    true;
 
   try {
+    // Primeiro travamos no backend. Só depois liberamos `pending`.
+    // Assim o poll de 15s não consegue enxergar a mesma oferta
+    // ainda como ready_to_publish e criar outra prévia.
     await setStatus(
       current.entry.itemId,
       "sending",
@@ -679,6 +1124,9 @@ async function sendPending(
           current.destination.name
       }
     );
+
+    pending =
+      null;
 
     const imageBuffer =
       await downloadImage(
@@ -800,6 +1248,9 @@ async function sendPending(
       error?.message ||
       error
     );
+  } finally {
+    actionInProgress =
+      false;
   }
 }
 
@@ -977,12 +1428,33 @@ async function start() {
             `⏱️ Poll: ${POLL_INTERVAL_MS} ms`
           );
           console.log(
+            `🔎 Auto discovery: ${AUTO_DISCOVERY_ENABLED ? "SIM" : "NÃO"}`
+          );
+          console.log(
+            AUTO_DISCOVERY_ENABLED
+              ? `🔎 Discovery interval: ${AUTO_DISCOVERY_INTERVAL_MS} ms`
+              : "🔎 Discovery interval: desligado"
+          );
+          console.log(
+            "💬 Comandos no Aggin: STATUS | DESCOBRIR | cole um meli.la"
+          );
+          console.log(
             "🛑 Ctrl + C para parar.\n"
           );
 
           await showNextPreview(
             sock
           );
+
+          if (
+            AUTO_DISCOVERY_ENABLED
+          ) {
+            triggerAutoDiscovery(
+              sock
+            ).catch(
+              console.error
+            );
+          }
         } catch (error) {
           console.error(
             "❌",
@@ -1128,6 +1600,46 @@ async function start() {
             continue;
           }
 
+          const affiliateLinks =
+            extractAffiliateLinks(
+              text
+            );
+
+          if (
+            affiliateLinks.length
+          ) {
+            await handleAffiliateLinksFromControl(
+              sock,
+              affiliateLinks
+            );
+
+            continue;
+          }
+
+          if (
+            isStatusCommand(
+              text
+            )
+          ) {
+            await sendQueueSummary(
+              sock
+            );
+
+            continue;
+          }
+
+          if (
+            isDiscoverCommand(
+              text
+            )
+          ) {
+            await triggerAutoDiscovery(
+              sock
+            );
+
+            continue;
+          }
+
           if (
             pending
               ?.failed ===
@@ -1197,6 +1709,21 @@ async function start() {
     },
     POLL_INTERVAL_MS
   );
+
+  if (
+    AUTO_DISCOVERY_ENABLED
+  ) {
+    setInterval(
+      () => {
+        triggerAutoDiscovery(
+          sock
+        ).catch(
+          console.error
+        );
+      },
+      AUTO_DISCOVERY_INTERVAL_MS
+    );
+  }
 
   return sock;
 }

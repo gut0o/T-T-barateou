@@ -1,8 +1,8 @@
-# T&T Barateou — Pacote acelerado 6.12A → 6.12D
+# T&T Barateou — Pacote acelerado 6.13A → 6.13E
 
-Este pacote conecta a fila pronta ao bot Baileys.
+Objetivo: deixar o sistema praticamente operando sozinho hoje.
 
-## Vercel
+## Limite Vercel
 
 Nenhuma Serverless Function nova.
 
@@ -14,177 +14,221 @@ Nenhuma Serverless Function nova.
 
 ---
 
-## 6.12A — Bot lê ready_to_publish
+# 1. Prévia duplicada corrigida
 
-Novo arquivo:
-
-```text
-whatsapp/publish-queue.js
-```
-
-Ele consulta periodicamente:
+Antes:
 
 ```text
-queue-list
-status=ready_to_publish
+SIM
+↓
+pending era liberado cedo demais
+↓
+poll podia enxergar ready_to_publish de novo
+↓
+segunda prévia
 ```
+
+Agora:
+
+```text
+SIM
+↓
+actionInProgress = true
+↓
+backend muda para sending
+↓
+só então a prévia é liberada
+```
+
+O polling fica bloqueado durante a transição.
+
+---
+
+# 2. Descoberta automática em várias categorias
+
+O bot agora usa uma rotação inicial:
+
+```text
+Vestidos
+Ares Condicionados
+Suplementos Alimentares
+Geladeiras de Brinquedo
+```
+
+Config:
+
+```text
+lib/tt-discovery-seeds.js
+```
+
+Cada execução consulta no máximo 2 categorias.
+
+Se uma categoria não tiver ranking disponível, as outras continuam.
 
 Por padrão:
 
 ```text
-a cada 15 segundos
+auto discovery = ligada
+intervalo = 15 minutos
+```
+
+Variáveis opcionais:
+
+```powershell
+$env:TT_AUTO_DISCOVERY = "true"
+$env:TT_AUTO_DISCOVERY_INTERVAL_MS = "900000"
 ```
 
 ---
 
-## 6.12B — Preview no Aggin
+# 3. Ofertas descobertas entram sozinhas na fila
 
-Quando encontra uma oferta pronta:
+Fluxo:
 
 ```text
+auto-discover
+→ highlights
+→ PRODUCT
+→ preço/imagem
+→ comissão
+→ score
+→ categoria T&T
+→ high/medium
+→ awaiting_affiliate_link
+```
+
+Se o item já existe na fila:
+
+```text
+não duplica
+```
+
+Isso inclui:
+
+```text
+sent
 ready_to_publish
-↓
-PRÉVIA no Aggin
-↓
-SIM / NÃO
-```
-
-Nesta etapa:
-
-```text
-testMode = true
-```
-
-Portanto mesmo a oferta final vai para o Aggin.
-
-Isso evita mandar oferta acidentalmente para um grupo real.
-
----
-
-## 6.12C — Roteamento por categoria T&T
-
-Novo arquivo:
-
-```text
-whatsapp/group-routing.json
-```
-
-Já contém as 8 categorias:
-
-```text
-moda_beleza
-casa_eletro
-tecnologia_games
-saude_fitness
-bebes_criancas
-auto_moto
-pet_shop
-ofertas_variedades
-```
-
-Os JIDs reais estão `null`.
-
-Quando os grupos existirem:
-
-1. preencher os JIDs;
-2. mudar:
-
-```json
-"testMode": false
-```
-
-A partir daí o bot escolhe o grupo usando:
-
-```text
-ttCategoryId
+awaiting_affiliate_link
+rejected
+...
 ```
 
 ---
 
-## 6.12D — sent / rejected / send_error / retry
+# 4. O Aggin vira painel de controle
 
-### SIM
+Comandos:
 
 ```text
-ready_to_publish
-→ sending
-→ envia imagem + caption
+STATUS
+DESCOBRIR
+```
+
+## STATUS
+
+Mostra:
+
+```text
+aguardando link
+prontas
+enviando
+enviadas
+erros
+rejeitadas
+```
+
+E lista algumas ofertas que precisam de link afiliado.
+
+## DESCOBRIR
+
+Força uma busca agora, sem esperar os 15 minutos.
+
+---
+
+# 5. Link afiliado direto pelo WhatsApp
+
+Agora não precisa mais PowerShell para ingestão.
+
+Quando o bot avisar uma oferta:
+
+```text
+🔎 Abrir produto: ...
+```
+
+Abra, gere o link afiliado e simplesmente cole no Aggin:
+
+```text
+https://meli.la/...
+```
+
+O bot faz:
+
+```text
+meli.la
+→ /api/offer
+→ score
+→ high/medium
+→ atualiza/cria fila
+→ ready_to_publish
+→ abre prévia
+→ SIM
+→ envia
 → sent
 ```
 
-Guarda:
+Se for low:
 
 ```text
-groupJid
-groupName
-whatsappMessageId
-sentAt
+held
 ```
 
-### NÃO
-
-```text
-ready_to_publish
-→ rejected
-```
-
-### Erro
-
-```text
-sending
-→ send_error
-retryCount + 1
-```
-
-O Aggin recebe:
-
-```text
-RETRY
-```
-
-Ao responder:
-
-```text
-RETRY
-→ ready_to_publish
-```
-
-e a oferta volta para a fila.
+e ele avisa no Aggin.
 
 ---
 
 # Arquivos
 
-Substitua no backend:
+Substitua:
 
 ```text
 api/discover-bestsellers.js
+
 lib/tt-queue-admin-actions.js
 lib/tt-pending-publication-store.js
-```
+lib/tt-publication-planner.js
 
-Adicione no WhatsApp:
-
-```text
 whatsapp/publish-queue.js
-whatsapp/group-routing.json
 ```
 
-Não remova ainda:
+Adicione:
 
 ```text
-whatsapp/listen-offers.js
+lib/tt-discovery-seeds.js
 ```
 
-O publisher novo é separado do listener antigo para o teste ficar controlado.
+`group-routing.json` está incluído, mas permanece:
+
+```json
+"testMode": true
+```
+
+Então ainda usamos somente o Aggin.
 
 ---
 
-# Deploy backend
+# Deploy
+
+Pare o bot:
+
+```text
+Ctrl + C
+```
+
+Depois:
 
 ```powershell
 git add .
-git commit -m "Conecta fila ao publicador WhatsApp"
+git commit -m "Automatiza descoberta e controle pelo WhatsApp"
 git push
 ```
 
@@ -192,114 +236,116 @@ Espere o Vercel ficar Ready.
 
 ---
 
-# Antes de rodar o bot
+# Iniciar
 
-Use a TT_QUEUE_ADMIN_KEY NOVA que está no Vercel:
-
-```powershell
-$env:TT_QUEUE_ADMIN_KEY = "SUA_CHAVE_NOVA"
-```
-
-Opcionalmente:
+A variável local continua:
 
 ```powershell
-$env:TT_QUEUE_POLL_MS = "15000"
+$env:TT_QUEUE_ADMIN_KEY = "SUA_CHAVE_ATUAL"
 ```
 
-Não coloque a chave no Git.
-
----
-
-# Rodar
-
-Na raiz do projeto:
+Depois:
 
 ```powershell
 node whatsapp\publish-queue.js
 ```
 
-O script reutiliza:
+O terminal deve mostrar:
 
 ```text
-whatsapp/auth_info
+🔎 Auto discovery: SIM
+💬 Comandos no Aggin: STATUS | DESCOBRIR | cole um meli.la
 ```
-
-da sessão Baileys já vinculada.
 
 ---
 
-# Resultado esperado com a bicicleta
+# TESTE 1
 
-A bicicleta já está:
+No Aggin envie:
+
+```text
+STATUS
+```
+
+O bot deve devolver o estado da fila.
+
+---
+
+# TESTE 2
+
+No Aggin envie:
+
+```text
+DESCOBRIR
+```
+
+Ele consulta duas categorias da rotação.
+
+Se houver novas high/medium, o Aggin recebe algo como:
+
+```text
+🔎 T&T encontrou 2 oferta(s) nova(s)
+
+1. Produto...
+💰 R$ ...
+📂 Moda & Beleza
+🔎 Abrir produto: https://www.mercadolivre.com.br/p/MLB...
+
+Depois gere o link de afiliado e cole o meli.la aqui no Aggin.
+```
+
+---
+
+# TESTE 3
+
+Cole no Aggin um link:
+
+```text
+https://meli.la/...
+```
+
+O bot responde com o resultado.
+
+Se aprovado:
 
 ```text
 ready_to_publish
-```
-
-Então em até ~15 segundos o Aggin deve receber:
-
-```text
-🧪 FILA T&T - PRÉVIA
-
-Categoria: Saúde & Fitness
-Destino: Aggin (TESTE)
-
-🔥 T&T BARATEOU
-...
-https://meli.la/2dEmkZq
-
-Responder SIM para enviar.
-Responder NÃO para rejeitar.
-```
-
-Responda:
-
-```text
+↓
+prévia
+↓
 SIM
-```
-
-O bot envia a imagem + mensagem final no próprio Aggin e o backend passa para:
-
-```text
+↓
 sent
 ```
 
 ---
 
-# Verificar depois
+# O que ainda falta para 100% autônomo
 
-No PowerShell:
+Só a geração do próprio link afiliado.
 
-```powershell
-$headers = @{
-  "x-tt-admin-key" = $env:TT_QUEUE_ADMIN_KEY
-}
-
-Invoke-RestMethod `
-  -Method GET `
-  -Uri "https://t-t-barateou.vercel.app/api/discover-bestsellers?action=queue-list&status=sent" `
-  -Headers $headers |
-  ConvertTo-Json -Depth 12
-```
-
-Devemos encontrar a bicicleta com:
+Hoje o sistema já consegue sozinho:
 
 ```text
-publicationStatus: sent
+buscar
+analisar
+selecionar
+não duplicar
+organizar fila
+pedir link
+receber link pelo WhatsApp
+validar
+montar anúncio
+pedir confirmação
+publicar
+registrar sent/error/retry
 ```
 
----
-
-# Atenção
-
-Baileys continua sendo uma integração não oficial do WhatsApp.
-
-Nesta etapa mantemos:
+Enquanto o link afiliado precisar ser gerado pelas ferramentas do Mercado Livre,
+o único trabalho manual fica sendo:
 
 ```text
-testMode: true
+abrir produto
+→ gerar link
+→ colar no Aggin
 ```
-
-e usamos apenas o grupo Aggin.
-
-Não configure grupos reais ainda.

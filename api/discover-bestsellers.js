@@ -32,9 +32,11 @@ import {
 
 import {
   handleAttachAffiliateAction,
+  handleAutoDiscoverAction,
   handleIngestAffiliateLinksAction,
   handlePublicationStatusAction,
-  handleQueueListAction
+  handleQueueListAction,
+  handleQueueSummaryAction
 } from "../lib/tt-queue-admin-actions.js";
 
 
@@ -313,6 +315,59 @@ export default async function handler(
       )
         .trim()
         .toLowerCase();
+
+    if (
+      action ===
+      "queue-summary"
+    ) {
+      const result =
+        await handleQueueSummaryAction(
+          req
+        );
+
+      return res
+        .status(200)
+        .json(
+          result
+        );
+    }
+
+    if (
+      action ===
+      "auto-discover"
+    ) {
+      if (
+        req.method !== "GET" &&
+        req.method !== "POST"
+      ) {
+        return res
+          .status(405)
+          .json({
+            ok:
+              false,
+
+            error:
+              "Use GET ou POST para descoberta automática.",
+
+            accessTokenExposed:
+              false,
+
+            refreshTokenExposed:
+              false
+          });
+      }
+
+      const result =
+        await handleAutoDiscoverAction(
+          req
+        );
+
+      return res
+        .status(200)
+        .json(
+          result
+        );
+    }
 
     if (
       action ===

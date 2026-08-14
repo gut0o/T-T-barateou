@@ -35,6 +35,7 @@ import {
   handleAutoDiscoverAction,
   handleIngestAffiliateLinksAction,
   handlePublicationStatusAction,
+  handleQueueDedupeAction,
   handleQueueListAction,
   handleQueueSummaryAction
 } from "../lib/tt-queue-admin-actions.js";
@@ -315,6 +316,22 @@ export default async function handler(
       )
         .trim()
         .toLowerCase();
+
+    if (
+      action ===
+      "queue-dedupe"
+    ) {
+      const result =
+        await handleQueueDedupeAction(
+          req
+        );
+
+      return res
+        .status(200)
+        .json(
+          result
+        );
+    }
 
     if (
       action ===

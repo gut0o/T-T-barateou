@@ -1,289 +1,139 @@
-# T&T Barateou — Pacote 6.14
+# T&T Barateou — 6.15 Anti-duplicação
 
-## Objetivo
+Corrige o caso em que o mesmo produto apareceu duas vezes.
 
-Eliminar o último passo manual:
+## Causa 1 — itemId não representa necessariamente o produto
 
-```text
-descoberta
-→ geração automática do meli.la
-→ validação
-→ preview
-→ SIM
-→ WhatsApp
-```
-
-## Importante
-
-O endpoint observado:
+Antes:
 
 ```text
-POST https://www.mercadolivre.com.br/affiliate-program/api/v2/affiliates/createLink
+dedupe = itemId
 ```
 
-é um endpoint interno da interface do Mercado Livre.
+Um mesmo PRODUCT de catálogo pode ter um item representante diferente
+quando o seller/preço muda.
 
-Não é uma API pública/documentada.
-
-Ele pode:
-- mudar;
-- exigir uma sessão válida;
-- parar de funcionar;
-- ter regras do programa que precisam ser respeitadas.
-
-Por isso a integração fica LOCAL e isolada.
-
----
-
-# Segurança
-
-NÃO coloque no Vercel:
+Agora:
 
 ```text
-ML_AFFILIATE_COOKIE
-ML_AFFILIATE_CSRF_TOKEN
+productId disponível
+→ dedupe por productId
+
+sem productId
+→ fallback por itemId
 ```
 
-NÃO coloque no Git.
+Se o produto já estiver:
 
-NÃO mande esses valores no ChatGPT.
+```text
+awaiting_affiliate_link
+ready_to_publish
+sending
+sent
+send_error
+rejected
+```
 
-Eles ficam apenas na sessão local do PowerShell que roda o Baileys.
+ele NÃO entra novamente.
 
----
+## Causa 2 — intervals após reconexão
 
-# Arquivos
+Antes uma reconexão Baileys podia iniciar novos timers sem encerrar
+os anteriores.
 
-Este pacote é autocontido em relação à 6.13.
+Agora:
+
+```text
+connection close
+→ clearActiveTimers()
+→ reconecta
+→ cria apenas um conjunto novo
+```
+
+Também existe:
+
+```text
+discoveryInProgress
+```
+
+para impedir duas descobertas simultâneas.
+
+## Limpeza dos duplicados que já existem
+
+Foi criada a ação interna:
+
+```text
+queue-dedupe
+```
+
+O publisher executa automaticamente ao conectar.
+
+Ele:
+- agrupa por productId;
+- se já existe `sent`, mantém o enviado;
+- neutraliza cópias ainda ativas;
+- se nenhum foi enviado, mantém a entrada mais avançada;
+- marca as demais como `duplicate_skipped`.
+
+Histórico já enviado não é apagado.
+
+No terminal:
+
+```text
+🧹 Dedupe fila: 2 grupo(s), 2 entrada(s) neutralizada(s).
+```
+
+ou:
+
+```text
+🧹 Dedupe fila: nenhuma duplicata ativa.
+```
+
+## Arquivos
 
 Substitua:
 
 ```text
 api/discover-bestsellers.js
-
 lib/tt-queue-admin-actions.js
 lib/tt-pending-publication-store.js
-lib/tt-publication-planner.js
-lib/tt-discovery-seeds.js
-
 whatsapp/publish-queue.js
-whatsapp/group-routing.json
 ```
 
-Adicione:
+O ZIP inclui também o `ml-affiliate-link.js` mais recente para manter o
+pacote consistente.
 
-```text
-whatsapp/ml-affiliate-link.js
-whatsapp/affiliate-session.example.txt
-```
+## Git
 
----
-
-# Deploy
-
-Primeiro pare o bot:
-
-```text
-Ctrl + C
-```
-
-Depois:
+Pare o bot com Ctrl+C e rode:
 
 ```powershell
 git add .
-git commit -m "Automatiza geracao local de link afiliado"
+git commit -m "Corrige duplicacao de ofertas"
 git push
 ```
 
 Espere o Vercel ficar Ready.
 
----
-
-# Configurar a sessão LOCAL
-
-No DevTools, use a requisição:
-
-```text
-createLink
-```
-
-Em Request Headers você já identificou:
-
-```text
-Cookie
-X-Csrf-Token
-```
-
-E no Payload existe:
-
-```text
-tag
-```
-
-No PowerShell, SEM mandar os valores para ninguém:
-
-```powershell
-$env:ML_AFFILIATE_COOKIE = 'COLE_LOCALMENTE_O_COOKIE_COMPLETO'
-$env:ML_AFFILIATE_CSRF_TOKEN = 'COLE_LOCALMENTE_O_VALOR_DE_X-Csrf-Token'
-$env:ML_AFFILIATE_TAG = 'COLE_LOCALMENTE_O_TAG_DO_PAYLOAD'
-```
-
-A TT_QUEUE_ADMIN_KEY continua:
-
-```powershell
-$env:TT_QUEUE_ADMIN_KEY = 'SUA_CHAVE_ATUAL'
-```
-
-Não use `setx` por enquanto.
-Assim, os cookies desaparecem quando a janela do PowerShell é encerrada.
-
----
-
-# Iniciar
+Depois:
 
 ```powershell
 node whatsapp\publish-queue.js
 ```
 
-Queremos ver:
+## Teste
+
+No início queremos ver:
 
 ```text
-🔗 Auto affiliate: SIM
-🔗 Sessão afiliado local: CONFIGURADA
+🧹 Dedupe fila: ...
 ```
 
----
-
-# Fluxo automático
-
-Quando houver:
+Depois envie no Aggin:
 
 ```text
-awaiting_affiliate_link
+DESCOBRIR
 ```
 
-o bot faz localmente:
-
-```text
-itemId
-productId
-↓
-POST createLink
-↓
-Cookie + X-Csrf-Token
-↓
-short_url
-↓
-https://meli.la/...
-```
-
-Depois chama o backend:
-
-```text
-attach-affiliate-link
-```
-
-O backend continua validando se o link corresponde ao item/produto esperado.
-
-Se validar:
-
-```text
-ready_to_publish
-```
-
-e o Aggin recebe:
-
-```text
-🔗 LINK AFILIADO GERADO AUTOMATICAMENTE
-...
-✅ Validado e movido para ready_to_publish.
-```
-
-Logo depois aparece a prévia.
-
----
-
-# Teste recomendado
-
-Já temos itens antigos na fila `awaiting_affiliate_link`.
-
-Então basta iniciar:
-
-```powershell
-node whatsapp\publish-queue.js
-```
-
-Não precisa enviar nada no Aggin.
-
-Em até ~30 segundos o bot deve tentar gerar um link automaticamente.
-
-No terminal:
-
-```text
-🔗 Gerando link afiliado: ...
-🔗 Link gerado: https://meli.la/...
-```
-
-No Aggin:
-
-```text
-🔗 LINK AFILIADO GERADO AUTOMATICAMENTE
-...
-```
-
-e depois:
-
-```text
-🧪 FILA T&T - PRÉVIA
-```
-
----
-
-# Se a sessão expirar
-
-Se Mercado Livre responder 401/403:
-
-```text
-⚠️ AUTOMAÇÃO DO LINK AFILIADO PAROU
-```
-
-O bot NÃO perde a oferta.
-
-Ela permanece:
-
-```text
-awaiting_affiliate_link
-```
-
-Você apenas:
-1. abre novamente a Central de Afiliados;
-2. gera um link manual uma vez;
-3. copia novos Cookie e X-Csrf-Token para o PowerShell;
-4. reinicia o bot.
-
----
-
-# Estado final esperado
-
-Com a sessão válida:
-
-```text
-T&T procura sozinho
-→ escolhe sozinho
-→ calcula score
-→ evita duplicata
-→ gera link afiliado sozinho
-→ valida link
-→ monta anúncio
-→ pede SIM
-→ envia
-→ registra sent
-```
-
-Por enquanto:
-
-```json
-"testMode": true
-```
-
-Então a publicação continua somente no Aggin.
+O mesmo productId não pode entrar novamente mesmo que o Mercado Livre
+retorne outro itemId/seller para ele.

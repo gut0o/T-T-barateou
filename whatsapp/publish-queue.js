@@ -120,6 +120,42 @@ let affiliateSessionBlocked =
 let affiliateSessionWarningSent =
   false;
 
+let discoveryInProgress =
+  false;
+
+const activeTimers =
+  new Set();
+
+function scheduleInterval(
+  callback,
+  intervalMs
+) {
+  const timer =
+    setInterval(
+      callback,
+      intervalMs
+    );
+
+  activeTimers.add(
+    timer
+  );
+
+  return timer;
+}
+
+function clearActiveTimers() {
+  for (
+    const timer of
+    activeTimers
+  ) {
+    clearInterval(
+      timer
+    );
+  }
+
+  activeTimers.clear();
+}
+
 const logger =
   P({
     level:
@@ -555,6 +591,14 @@ async function getQueueSummary() {
   return apiGet({
     action:
       "queue-summary"
+  });
+}
+
+
+async function repairQueueDuplicates() {
+  return apiGet({
+    action:
+      "queue-dedupe"
   });
 }
 
@@ -1070,10 +1114,14 @@ async function triggerAutoDiscovery(
   sock
 ) {
   if (
-    actionInProgress
+    actionInProgress ||
+    discoveryInProgress
   ) {
     return;
   }
+
+  discoveryInProgress =
+    true;
 
   try {
     console.log(
@@ -1103,6 +1151,9 @@ async function triggerAutoDiscovery(
       error?.message ||
       error
     );
+  } finally {
+    discoveryInProgress =
+      false;
   }
 }
 
@@ -1702,6 +1753,30 @@ async function start() {
             "🛑 Ctrl + C para parar.\n"
           );
 
+          try {
+            const repair =
+              await repairQueueDuplicates();
+
+            if (
+              repair.markedCount > 0 ||
+              repair.duplicateGroups > 0
+            ) {
+              console.log(
+                `🧹 Dedupe fila: ${repair.duplicateGroups} grupo(s), ${repair.markedCount} entrada(s) neutralizada(s).`
+              );
+            } else {
+              console.log(
+                "🧹 Dedupe fila: nenhuma duplicata ativa."
+              );
+            }
+          } catch (error) {
+            console.error(
+              "⚠️ Não consegui executar dedupe inicial:",
+              error?.message ||
+              error
+            );
+          }
+
           await showNextPreview(
             sock
           );
@@ -1763,6 +1838,10 @@ async function start() {
         console.log(
           "🔄 Reconectando..."
         );
+
+        // Evita que intervals do socket antigo continuem rodando
+        // junto com os intervals da nova conexão.
+        clearActiveTimers();
 
         await sleep(
           1500
@@ -1971,7 +2050,7 @@ async function start() {
     }
   );
 
-  setInterval(
+  scheduleInterval(
     () => {
       showNextPreview(
         sock
@@ -1985,7 +2064,7 @@ async function start() {
   if (
     AUTO_DISCOVERY_ENABLED
   ) {
-    setInterval(
+    scheduleInterval(
       () => {
         triggerAutoDiscovery(
           sock
@@ -2000,7 +2079,7 @@ async function start() {
   if (
     AUTO_AFFILIATE_ENABLED
   ) {
-    setInterval(
+    scheduleInterval(
       () => {
         fillNextAffiliateLink(
           sock

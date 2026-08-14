@@ -1,0 +1,41 @@
+{
+  "testMode": true,
+  "controlGroup": {
+    "name": "Aggin",
+    "jid": "120363412894604457@g.us"
+  },
+  "categories": {
+    "moda_beleza": {
+      "name": "Moda & Beleza",
+      "jid": null
+    },
+    "casa_eletro": {
+      "name": "Casa & Eletro",
+      "jid": null
+    },
+    "tecnologia_games": {
+      "name": "Tecnologia & Games",
+      "jid": null
+    },
+    "saude_fitness": {
+      "name": "Saúde & Fitness",
+      "jid": null
+    },
+    "bebes_criancas": {
+      "name": "Bebês & Crianças",
+      "jid": null
+    },
+    "auto_moto": {
+      "name": "Auto & Moto",
+      "jid": null
+    },
+    "pet_shop": {
+      "name": "Pet Shop",
+      "jid": null
+    },
+    "ofertas_variedades": {
+      "name": "Ofertas & Variedades",
+      "jid": null
+    }
+  }
+}

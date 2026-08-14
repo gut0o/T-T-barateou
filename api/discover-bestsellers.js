@@ -33,6 +33,7 @@ import {
 import {
   handleAttachAffiliateAction,
   handleIngestAffiliateLinksAction,
+  handlePublicationStatusAction,
   handleQueueListAction
 } from "../lib/tt-queue-admin-actions.js";
 
@@ -365,6 +366,43 @@ export default async function handler(
             ? 400
             : 200
         )
+        .json(
+          result
+        );
+    }
+
+    if (
+      action ===
+      "publication-status"
+    ) {
+      if (
+        req.method !==
+        "POST"
+      ) {
+        return res
+          .status(405)
+          .json({
+            ok:
+              false,
+
+            error:
+              "Use POST para atualizar status de publicação.",
+
+            accessTokenExposed:
+              false,
+
+            refreshTokenExposed:
+              false
+          });
+      }
+
+      const result =
+        await handlePublicationStatusAction(
+          req
+        );
+
+      return res
+        .status(200)
         .json(
           result
         );

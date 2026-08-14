@@ -123,6 +123,133 @@ let affiliateSessionWarningSent =
 let discoveryInProgress =
   false;
 
+// Proteção local contra leituras repetidas da fila logo após uma
+// mudança de estado no backend.
+//
+// Mesmo que o Blob/API ainda devolva por alguns segundos um estado
+// anterior, o mesmo produto não volta a gerar link ou prévia.
+const RECENT_OPERATION_TTL_MS =
+  Math.max(
+    Number(
+      process.env
+        .TT_RECENT_OPERATION_TTL_MS ||
+      600000
+    ) || 600000,
+    60000
+  );
+
+const recentAffiliateProducts =
+  new Map();
+
+const recentPreviewProducts =
+  new Map();
+
+const recentSentProducts =
+  new Map();
+
+function operationKey(
+  entry
+) {
+  return String(
+    entry?.productId ||
+    entry?.itemId ||
+    ""
+  )
+    .trim()
+    .toUpperCase();
+}
+
+function cleanupRecentMap(
+  map
+) {
+  const now =
+    Date.now();
+
+  for (
+    const [
+      key,
+      expiresAt
+    ] of
+    map.entries()
+  ) {
+    if (
+      expiresAt <= now
+    ) {
+      map.delete(
+        key
+      );
+    }
+  }
+}
+
+function isRecentlyHandled(
+  map,
+  entry
+) {
+  cleanupRecentMap(
+    map
+  );
+
+  const key =
+    operationKey(
+      entry
+    );
+
+  if (!key) {
+    return false;
+  }
+
+  const expiresAt =
+    map.get(
+      key
+    );
+
+  return (
+    typeof expiresAt === "number" &&
+    expiresAt > Date.now()
+  );
+}
+
+function rememberHandled(
+  map,
+  entry,
+  ttlMs =
+    RECENT_OPERATION_TTL_MS
+) {
+  const key =
+    operationKey(
+      entry
+    );
+
+  if (!key) {
+    return;
+  }
+
+  map.set(
+    key,
+    Date.now() +
+    ttlMs
+  );
+}
+
+function forgetHandled(
+  map,
+  entry
+) {
+  const key =
+    operationKey(
+      entry
+    );
+
+  if (
+    key
+  ) {
+    map.delete(
+      key
+    );
+  }
+}
+
 const activeTimers =
   new Set();
 
@@ -613,13 +740,27 @@ async function getAwaitingAffiliateItem() {
         "awaiting_affiliate_link",
 
       limit:
-        1
+        10
     });
 
-  return (
+  const entries =
     response
       ?.queue
-      ?.entries?.[0] ||
+      ?.entries ||
+    [];
+
+  return (
+    entries.find(
+      (entry) =>
+        !isRecentlyHandled(
+          recentAffiliateProducts,
+          entry
+        ) &&
+        !isRecentlyHandled(
+          recentSentProducts,
+          entry
+        )
+    ) ||
     null
   );
 }
@@ -672,13 +813,27 @@ async function getReadyItem() {
         "ready_to_publish",
 
       limit:
-        1
+        10
     });
 
-  return (
+  const entries =
     response
       ?.queue
-      ?.entries?.[0] ||
+      ?.entries ||
+    [];
+
+  return (
+    entries.find(
+      (entry) =>
+        !isRecentlyHandled(
+          recentPreviewProducts,
+          entry
+        ) &&
+        !isRecentlyHandled(
+          recentSentProducts,
+          entry
+        )
+    ) ||
     null
   );
 }
@@ -853,6 +1008,14 @@ async function fillNextAffiliateLink(
       return;
     }
 
+    // Bloqueia ANTES da chamada. Se outro trigger local ocorrer
+    // enquanto createLink/validação ainda estão terminando,
+    // ele não pega este mesmo produto.
+    rememberHandled(
+      recentAffiliateProducts,
+      entry
+    );
+
     console.log(
       `🔗 Gerando link afiliado: ${entry.title}`
     );
@@ -937,6 +1100,19 @@ async function fillNextAffiliateLink(
       error?.message ||
       error
     );
+
+    // Não repete imediatamente o mesmo erro a cada 30s.
+    // Depois de 60s o item pode ser tentado novamente.
+    if (
+      typeof entry !== "undefined" &&
+      entry
+    ) {
+      rememberHandled(
+        recentAffiliateProducts,
+        entry,
+        60000
+      );
+    }
 
     await sock.sendMessage(
       routing
@@ -1295,6 +1471,11 @@ async function showNextPreview(
       return;
     }
 
+    rememberHandled(
+      recentPreviewProducts,
+      entry
+    );
+
     pending = {
       entry,
       destination
@@ -1322,6 +1503,17 @@ async function showNextPreview(
       error?.message ||
       error
     );
+
+    if (
+      typeof entry !== "undefined" &&
+      entry
+    ) {
+      rememberHandled(
+        recentPreviewProducts,
+        entry,
+        60000
+      );
+    }
   } finally {
     polling =
       false;
@@ -1458,6 +1650,26 @@ async function sendPending(
           sent?.key?.id ||
           null
       }
+    );
+
+    // Mesmo se a fila remota devolver por alguns instantes o estado
+    // anterior, este produto fica impedido localmente de reaparecer.
+    rememberHandled(
+      recentSentProducts,
+      current.entry,
+      RECENT_OPERATION_TTL_MS
+    );
+
+    rememberHandled(
+      recentPreviewProducts,
+      current.entry,
+      RECENT_OPERATION_TTL_MS
+    );
+
+    rememberHandled(
+      recentAffiliateProducts,
+      current.entry,
+      RECENT_OPERATION_TTL_MS
     );
 
     await sock.sendMessage(
@@ -1716,6 +1928,9 @@ async function start() {
           );
           console.log(
             `⏱️ Poll: ${POLL_INTERVAL_MS} ms`
+          );
+          console.log(
+            `🛡️ Anti-repeat local: ${RECENT_OPERATION_TTL_MS} ms`
           );
           console.log(
             `🔎 Auto discovery: ${AUTO_DISCOVERY_ENABLED ? "SIM" : "NÃO"}`

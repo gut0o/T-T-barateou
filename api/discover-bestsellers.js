@@ -32,6 +32,7 @@ import {
 
 import {
   handleAttachAffiliateAction,
+  handleIngestAffiliateLinksAction,
   handleQueueListAction
 } from "../lib/tt-queue-admin-actions.js";
 
@@ -362,6 +363,47 @@ export default async function handler(
         .status(
           result.ok === false
             ? 400
+            : 200
+        )
+        .json(
+          result
+        );
+    }
+
+    if (
+      action ===
+      "ingest-affiliate-links"
+    ) {
+      if (
+        req.method !==
+        "POST"
+      ) {
+        return res
+          .status(405)
+          .json({
+            ok:
+              false,
+
+            error:
+              "Use POST para importar links afiliados.",
+
+            accessTokenExposed:
+              false,
+
+            refreshTokenExposed:
+              false
+          });
+      }
+
+      const result =
+        await handleIngestAffiliateLinksAction(
+          req
+        );
+
+      return res
+        .status(
+          result.ok === false
+            ? 207
             : 200
         )
         .json(

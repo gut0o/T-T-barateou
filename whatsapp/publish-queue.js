@@ -860,9 +860,7 @@ async function runAutoDiscovery({
             : discoveryCursor,
 
         limit:
-          targeted
-            ? 1
-            : 2,
+          1,
 
         group:
           group ||

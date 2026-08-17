@@ -19,6 +19,11 @@ import {
   createAffiliateLink
 } from "./ml-affiliate-link.js";
 
+import {
+  classifyOfferDestination,
+  filterEligibleOffers
+} from "./group-filters.js";
+
 const __filename =
   fileURLToPath(
     import.meta.url
@@ -739,8 +744,10 @@ async function getAwaitingAffiliateItem() {
       status:
         "awaiting_affiliate_link",
 
+      // Procuramos mais entradas porque produtos fora dos
+      // três filtros ativos ficam simplesmente ignorados.
       limit:
-        10
+        100
     });
 
   const entries =
@@ -752,6 +759,12 @@ async function getAwaitingAffiliateItem() {
   return (
     entries.find(
       (entry) =>
+        Boolean(
+          classifyOfferDestination(
+            entry,
+            routing
+          )
+        ) &&
         !isRecentlyHandled(
           recentAffiliateProducts,
           entry
@@ -813,7 +826,7 @@ async function getReadyItem() {
         "ready_to_publish",
 
       limit:
-        10
+        100
     });
 
   const entries =
@@ -825,6 +838,12 @@ async function getReadyItem() {
   return (
     entries.find(
       (entry) =>
+        Boolean(
+          classifyOfferDestination(
+            entry,
+            routing
+          )
+        ) &&
         !isRecentlyHandled(
           recentPreviewProducts,
           entry
@@ -841,6 +860,16 @@ async function getReadyItem() {
 function resolveDestination(
   entry
 ) {
+  const target =
+    classifyOfferDestination(
+      entry,
+      routing
+    );
+
+  if (!target) {
+    return null;
+  }
+
   if (
     routing.testMode ===
     true
@@ -852,38 +881,47 @@ function resolveDestination(
           .jid,
 
       name:
-        `${routing.controlGroup.name} (TESTE)`,
+        `${target.name} → ${routing.controlGroup.name} (TESTE)`,
+
+      realJid:
+        target.jid,
+
+      realName:
+        target.name,
+
+      filterKey:
+        target.filterKey,
+
+      filterLabel:
+        target.filterLabel,
 
       testMode:
         true
     };
   }
 
-  const category =
-    routing
-      ?.categories
-      ?.[
-        entry.ttCategoryId
-      ];
+  return {
+    jid:
+      target.jid,
 
-  if (
-    category?.jid
-  ) {
-    return {
-      jid:
-        category.jid,
+    name:
+      target.name,
 
-      name:
-        category.name ||
-        entry.ttCategoryName ||
-        entry.ttCategoryId,
+    realJid:
+      target.jid,
 
-      testMode:
-        false
-    };
-  }
+    realName:
+      target.name,
 
-  return null;
+    filterKey:
+      target.filterKey,
+
+    filterLabel:
+      target.filterLabel,
+
+    testMode:
+      false
+  };
 }
 
 async function downloadImage(
@@ -932,6 +970,7 @@ function previewCaption(
     "",
     `Categoria: *${entry.ttCategoryName || entry.ttCategoryId || "não informada"}*`,
     `Destino: *${destination.name}*`,
+    `Filtro: *${destination.filterLabel || "não informado"}*`,
     "",
     entry.messageDraft || "(sem mensagem)",
     "",
@@ -944,7 +983,7 @@ function previewCaption(
   ) {
     lines.push(
       "",
-      "⚠️ *MODO DE TESTE:* a oferta final também será enviada no Aggin."
+      `⚠️ *MODO DE TESTE:* a oferta final também será enviada em ${routing.controlGroup.name}.`
     );
   }
 
@@ -1222,26 +1261,56 @@ async function notifyAutoDiscovery(
   sock,
   result
 ) {
-  const newOffers =
+  const discoveredOffers =
     Array.isArray(
       result?.newOffers
     )
       ? result.newOffers
       : [];
 
-  if (!newOffers.length) {
-    console.log(
-      `🔎 Descoberta automática: nenhuma oferta nova. Próximo cursor: ${discoveryCursor}`
+  const newOffers =
+    filterEligibleOffers(
+      discoveredOffers,
+      routing
     );
+
+  const ignoredCount =
+    Math.max(
+      discoveredOffers.length -
+      newOffers.length,
+      0
+    );
+
+  if (!newOffers.length) {
+    if (
+      discoveredOffers.length > 0
+    ) {
+      console.log(
+        `🔎 Descoberta automática: ${ignoredCount} oferta(s) nova(s) ignorada(s) pelos filtros. Próximo cursor: ${discoveryCursor}`
+      );
+    } else {
+      console.log(
+        `🔎 Descoberta automática: nenhuma oferta nova. Próximo cursor: ${discoveryCursor}`
+      );
+    }
 
     return;
   }
 
   const lines = [
-    `🔎 *T&T encontrou ${newOffers.length} oferta(s) nova(s)*`,
+    `🔎 *T&T encontrou ${newOffers.length} oferta(s) dentro dos filtros*`,
     "",
-    "Elas passaram pela regra high/medium e estão aguardando link afiliado."
+    "Elas passaram pela regra high/medium e pertencem a um dos grupos ativos."
   ];
+
+  if (
+    ignoredCount > 0
+  ) {
+    lines.push(
+      "",
+      `🚫 Fora dos filtros e ignoradas: ${ignoredCount}`
+    );
+  }
 
   newOffers
     .slice(
@@ -1250,6 +1319,12 @@ async function notifyAutoDiscovery(
     )
     .forEach(
       (offer, index) => {
+        const target =
+          classifyOfferDestination(
+            offer,
+            routing
+          );
+
         lines.push(
           "",
           `${index + 1}. *${offer.title}*`,
@@ -1259,13 +1334,12 @@ async function notifyAutoDiscovery(
           offer.discount !== null
             ? `🔥 ${offer.discount}% OFF`
             : "",
-          offer.ttCategoryName
-            ? `📂 ${offer.ttCategoryName}`
+          target?.name
+            ? `🎯 Grupo: ${target.name}`
             : "",
           offer.catalogPageUrl
             ? `🔎 Abrir produto: ${offer.catalogPageUrl}`
-            : "",
-          "Depois gere o link de afiliado e cole o meli.la aqui no Aggin."
+            : ""
         );
       }
     );
@@ -1962,7 +2036,7 @@ async function start() {
             );
           }
           console.log(
-            "💬 Comandos no Aggin: STATUS | DESCOBRIR | cole um meli.la"
+            `💬 Comandos em ${routing.controlGroup.name}: STATUS | DESCOBRIR | cole um meli.la`
           );
           console.log(
             "🛑 Ctrl + C para parar.\n"

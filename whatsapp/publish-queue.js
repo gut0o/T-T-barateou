@@ -126,6 +126,19 @@ const AUTO_BATCH_PAUSE_MS =
     60000
   );
 
+const AUTO_BATCH_DISCOVERY_ATTEMPTS =
+  Math.max(
+    Math.min(
+      Number(
+        process.env
+          .TT_AUTO_BATCH_DISCOVERY_ATTEMPTS ||
+        5
+      ) || 5,
+      10
+    ),
+    1
+  );
+
 const AUTO_BATCH_GROUPS = [
   "eletronicos",
   "fitness",
@@ -953,7 +966,8 @@ async function attachAffiliateLink({
 }
 
 async function runAutoDiscovery({
-  group = null
+  group = null,
+  cursor = null
 } = {}) {
   const targeted =
     Boolean(
@@ -966,7 +980,13 @@ async function runAutoDiscovery({
       {
         cursor:
           targeted
-            ? 0
+            ? (
+                Number.isFinite(
+                  Number(cursor)
+                )
+                  ? Number(cursor)
+                  : 0
+              )
             : discoveryCursor,
 
         limit:
@@ -1922,25 +1942,20 @@ async function processAutomaticBatchGroup(
     `${meta.emoji} Lote iniciado: ${meta.label} (máx. ${AUTO_BATCH_SIZE})`
   );
 
-  try {
-    await runAutoDiscovery({
-      group
-    });
-  } catch (error) {
-    console.error(
-      `⚠️ Descoberta ${meta.label}:`,
-      error?.message ||
-      error
-    );
-  }
-
   let sentCount =
+    0;
+
+  let discoveryAttempts =
+    0;
+
+  let targetedCursor =
     0;
 
   while (
     sentCount <
     AUTO_BATCH_SIZE
   ) {
+    // 1. Tenta aproveitar algo que já está pronto.
     let entry =
       await getReadyItem(
         group,
@@ -1950,6 +1965,8 @@ async function processAutomaticBatchGroup(
         }
       );
 
+    // 2. Se não está pronto, tenta gerar afiliado de algo já
+    //    descoberto/enfileirado.
     if (!entry) {
       const generated =
         await fillNextAffiliateLink(
@@ -1961,20 +1978,74 @@ async function processAutomaticBatchGroup(
           }
         );
 
-      if (!generated) {
-        break;
+      if (
+        generated
+      ) {
+        entry =
+          await getReadyItem(
+            group,
+            {
+              ignorePreviewMemory:
+                true
+            }
+          );
       }
-
-      entry =
-        await getReadyItem(
-          group,
-          {
-            ignorePreviewMemory:
-              true
-          }
-        );
     }
 
+    // 3. Se a fila daquele grupo está vazia, abre uma nova
+    //    frente de busca. Cada tentativa usa outra semente.
+    if (
+      !entry &&
+      discoveryAttempts <
+        AUTO_BATCH_DISCOVERY_ATTEMPTS
+    ) {
+      const attempt =
+        discoveryAttempts +
+        1;
+
+      console.log(
+        `${meta.emoji} Busca ${attempt}/${AUTO_BATCH_DISCOVERY_ATTEMPTS}: ${meta.label} (cursor ${targetedCursor})`
+      );
+
+      let result =
+        null;
+
+      try {
+        result =
+          await runAutoDiscovery({
+            group,
+            cursor:
+              targetedCursor
+          });
+      } catch (error) {
+        console.error(
+          `⚠️ Descoberta ${meta.label}:`,
+          error?.message ||
+          error
+        );
+      }
+
+      discoveryAttempts +=
+        1;
+
+      if (
+        typeof result
+          ?.nextCursor ===
+          "number"
+      ) {
+        targetedCursor =
+          result.nextCursor;
+      } else {
+        targetedCursor +=
+          1;
+      }
+
+      // Depois da descoberta, volta ao topo para:
+      // ready → affiliate → send.
+      continue;
+    }
+
+    // 4. Todas as frentes foram consultadas e não há produto novo.
     if (!entry) {
       break;
     }
@@ -2005,7 +2076,7 @@ async function processAutomaticBatchGroup(
   }
 
   console.log(
-    `${meta.emoji} Lote concluído: ${meta.label} → ${sentCount}/${AUTO_BATCH_SIZE}`
+    `${meta.emoji} Lote concluído: ${meta.label} → ${sentCount}/${AUTO_BATCH_SIZE} | buscas ${discoveryAttempts}/${AUTO_BATCH_DISCOVERY_ATTEMPTS}`
   );
 
   return sentCount;
@@ -2632,6 +2703,9 @@ async function start() {
           ) {
             console.log(
               `📦 Lote: até ${AUTO_BATCH_SIZE} por grupo`
+            );
+            console.log(
+              `🔎 Pool: até ${AUTO_BATCH_DISCOVERY_ATTEMPTS} buscas por grupo/ciclo`
             );
             console.log(
               `⏸️ Pausa após ciclo: ${AUTO_BATCH_PAUSE_MS} ms`

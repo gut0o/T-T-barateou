@@ -1925,6 +1925,149 @@ async function sendEntryAutomatically(
   }
 }
 
+async function waitForReadyBatchItem(
+  group,
+  {
+    attempts = 8,
+    delayMs = 750
+  } = {}
+) {
+  for (
+    let attempt = 1;
+    attempt <= attempts;
+    attempt += 1
+  ) {
+    const entry =
+      await getReadyItem(
+        group,
+        {
+          ignorePreviewMemory:
+            true
+        }
+      );
+
+    if (entry) {
+      return entry;
+    }
+
+    if (
+      attempt <
+      attempts
+    ) {
+      await sleep(
+        delayMs
+      );
+    }
+  }
+
+  return null;
+}
+
+function logDiscoveryDiagnostic(
+  meta,
+  result
+) {
+  const categories =
+    Array.isArray(
+      result?.categories
+    )
+      ? result.categories
+      : [];
+
+  if (
+    categories.length === 0
+  ) {
+    console.log(
+      `${meta.emoji}   ↳ sem diagnóstico de categoria`
+    );
+
+    return;
+  }
+
+  for (
+    const category of
+    categories
+  ) {
+    const seedLabel =
+      category
+        ?.seed
+        ?.label ||
+      category
+        ?.seed
+        ?.key ||
+      "categoria";
+
+    const status =
+      category?.ok === true
+        ? "OK"
+        : "ERRO";
+
+    const candidateCount =
+      category
+        ?.candidateCount ??
+      0;
+
+    const readyCount =
+      category
+        ?.readyCount ??
+      0;
+
+    const newQueuedCount =
+      category
+        ?.newQueuedCount ??
+      0;
+
+    const duplicateCount =
+      category
+        ?.duplicateCount ??
+      0;
+
+    const newOfferCount =
+      Array.isArray(
+        category?.newOffers
+      )
+        ? category.newOffers.length
+        : 0;
+
+    console.log(
+      `${meta.emoji}   ↳ ${seedLabel}: ${status} | candidatos ${candidateCount} | ready ${readyCount} | novos ${newQueuedCount} | ofertas novas ${newOfferCount} | duplicados ${duplicateCount}`
+    );
+
+    if (
+      category?.ok !== true &&
+      category?.error
+    ) {
+      console.log(
+        `${meta.emoji}      erro: ${category.error}`
+      );
+    }
+  }
+
+  const discovered =
+    Array.isArray(
+      result?.newOffers
+    )
+      ? result.newOffers
+      : [];
+
+  const eligible =
+    filterEligibleOffers(
+      discovered,
+      routing
+    ).filter(
+      (offer) =>
+        classifyOfferDestination(
+          offer,
+          routing
+        )?.filterKey ===
+        result?.group
+    );
+
+  console.log(
+    `${meta.emoji}   ↳ total desta busca: novos ${discovered.length} | elegíveis para ${meta.label}: ${eligible.length}`
+  );
+}
+
 async function processAutomaticBatchGroup(
   sock,
   group
@@ -1981,14 +2124,20 @@ async function processAutomaticBatchGroup(
       if (
         generated
       ) {
+        // O backend/Blob pode levar alguns instantes para refletir
+        // awaiting_affiliate_link -> ready_to_publish.
+        // Não encerramos o lote só porque a primeira leitura ainda
+        // viu o estado antigo.
         entry =
-          await getReadyItem(
-            group,
-            {
-              ignorePreviewMemory:
-                true
-            }
+          await waitForReadyBatchItem(
+            group
           );
+
+        if (!entry) {
+          console.log(
+            `${meta.emoji} Link gerado, mas ready_to_publish ainda não apareceu após a espera.`
+          );
+        }
       }
     }
 
@@ -2017,6 +2166,11 @@ async function processAutomaticBatchGroup(
             cursor:
               targetedCursor
           });
+
+        logDiscoveryDiagnostic(
+          meta,
+          result
+        );
       } catch (error) {
         console.error(
           `⚠️ Descoberta ${meta.label}:`,

@@ -4,6 +4,20 @@
     "name": "Esquizofrenia",
     "jid": "5514997721192-1621364889@g.us"
   },
+  "destinations": {
+    "perfumes": {
+      "name": "Perfumes",
+      "jid": "120363412894604457@g.us"
+    },
+    "eletronicos": {
+      "name": "Eletrônicos",
+      "jid": "120363410742695739@g.us"
+    },
+    "fitness": {
+      "name": "Fitness",
+      "jid": "120363428242446983@g.us"
+    }
+  },
   "categories": {
     "moda_beleza": {
       "name": "Moda & Beleza",
@@ -14,12 +28,12 @@
       "jid": null
     },
     "tecnologia_games": {
-      "name": "Tecnologia & Games",
-      "jid": null
+      "name": "Eletrônicos",
+      "jid": "120363410742695739@g.us"
     },
     "saude_fitness": {
-      "name": "Saúde & Fitness",
-      "jid": null
+      "name": "Fitness",
+      "jid": "120363428242446983@g.us"
     },
     "bebes_criancas": {
       "name": "Bebês & Crianças",
@@ -36,6 +50,13 @@
     "ofertas_variedades": {
       "name": "Ofertas & Variedades",
       "jid": null
+    }
+  },
+  "specialRules": {
+    "perfumes": {
+      "enabled": true,
+      "destination": "perfumes",
+      "note": "Será ativado no próximo passo com filtro exclusivo de perfumes/fragrâncias."
     }
   }
 }

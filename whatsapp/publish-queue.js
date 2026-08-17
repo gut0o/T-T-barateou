@@ -93,8 +93,76 @@ const AUTO_DISCOVERY_INTERVAL_MS =
     60000
   );
 
+const AUTO_BATCH_ENABLED =
+  String(
+    process.env
+      .TT_AUTO_BATCH ||
+    "true"
+  )
+    .trim()
+    .toLowerCase() !==
+  "false";
+
+const AUTO_BATCH_SIZE =
+  Math.max(
+    Math.min(
+      Number(
+        process.env
+          .TT_AUTO_BATCH_SIZE ||
+        3
+      ) || 3,
+      10
+    ),
+    1
+  );
+
+const AUTO_BATCH_PAUSE_MS =
+  Math.max(
+    Number(
+      process.env
+        .TT_AUTO_BATCH_PAUSE_MS ||
+      900000
+    ) || 900000,
+    60000
+  );
+
+const AUTO_BATCH_GROUPS = [
+  "eletronicos",
+  "fitness",
+  "perfumes"
+];
+
+const AUTO_BATCH_LABELS = {
+  eletronicos: {
+    emoji:
+      "📱",
+
+    label:
+      "Eletrônicos"
+  },
+
+  fitness: {
+    emoji:
+      "💪",
+
+    label:
+      "Fitness"
+  },
+
+  perfumes: {
+    emoji:
+      "🌸",
+
+    label:
+      "Perfumes"
+  }
+};
+
 let discoveryCursor =
   0;
+
+let automaticBatchInProgress =
+  false;
 
 const AUTO_AFFILIATE_ENABLED =
   String(
@@ -275,12 +343,39 @@ function scheduleInterval(
   return timer;
 }
 
+function scheduleTimeout(
+  callback,
+  delayMs
+) {
+  const timer =
+    setTimeout(
+      () => {
+        activeTimers.delete(
+          timer
+        );
+
+        callback();
+      },
+      delayMs
+    );
+
+  activeTimers.add(
+    timer
+  );
+
+  return timer;
+}
+
 function clearActiveTimers() {
   for (
     const timer of
     activeTimers
   ) {
     clearInterval(
+      timer
+    );
+
+    clearTimeout(
       timer
     );
   }
@@ -786,7 +881,9 @@ async function repairQueueDuplicates() {
 }
 
 
-async function getAwaitingAffiliateItem() {
+async function getAwaitingAffiliateItem(
+  group = null
+) {
   const response =
     await apiGet({
       action:
@@ -795,8 +892,6 @@ async function getAwaitingAffiliateItem() {
       status:
         "awaiting_affiliate_link",
 
-      // Procuramos mais entradas porque produtos fora dos
-      // três filtros ativos ficam simplesmente ignorados.
       limit:
         100
     });
@@ -809,21 +904,36 @@ async function getAwaitingAffiliateItem() {
 
   return (
     entries.find(
-      (entry) =>
-        Boolean(
+      (entry) => {
+        const target =
           classifyOfferDestination(
             entry,
             routing
+          );
+
+        if (!target) {
+          return false;
+        }
+
+        if (
+          group &&
+          target.filterKey !==
+            group
+        ) {
+          return false;
+        }
+
+        return (
+          !isRecentlyHandled(
+            recentAffiliateProducts,
+            entry
+          ) &&
+          !isRecentlyHandled(
+            recentSentProducts,
+            entry
           )
-        ) &&
-        !isRecentlyHandled(
-          recentAffiliateProducts,
-          entry
-        ) &&
-        !isRecentlyHandled(
-          recentSentProducts,
-          entry
-        )
+        );
+      }
     ) ||
     null
   );
@@ -882,7 +992,12 @@ async function runAutoDiscovery({
   return result;
 }
 
-async function getReadyItem() {
+async function getReadyItem(
+  group = null,
+  {
+    ignorePreviewMemory = false
+  } = {}
+) {
   const response =
     await apiGet({
       action:
@@ -903,21 +1018,39 @@ async function getReadyItem() {
 
   return (
     entries.find(
-      (entry) =>
-        Boolean(
+      (entry) => {
+        const target =
           classifyOfferDestination(
             entry,
             routing
+          );
+
+        if (!target) {
+          return false;
+        }
+
+        if (
+          group &&
+          target.filterKey !==
+            group
+        ) {
+          return false;
+        }
+
+        return (
+          (
+            ignorePreviewMemory ||
+            !isRecentlyHandled(
+              recentPreviewProducts,
+              entry
+            )
+          ) &&
+          !isRecentlyHandled(
+            recentSentProducts,
+            entry
           )
-        ) &&
-        !isRecentlyHandled(
-          recentPreviewProducts,
-          entry
-        ) &&
-        !isRecentlyHandled(
-          recentSentProducts,
-          entry
-        )
+        );
+      }
     ) ||
     null
   );
@@ -1086,20 +1219,24 @@ async function notifyAffiliateSessionProblem(
 }
 
 async function fillNextAffiliateLink(
-  sock
+  sock,
+  {
+    group = null,
+    batchMode = false
+  } = {}
 ) {
   if (
     !AUTO_AFFILIATE_ENABLED ||
     affiliateFillInProgress ||
     affiliateSessionBlocked
   ) {
-    return;
+    return false;
   }
 
   if (
     !affiliateSessionConfigured()
   ) {
-    return;
+    return false;
   }
 
   affiliateFillInProgress =
@@ -1107,10 +1244,12 @@ async function fillNextAffiliateLink(
 
   try {
     const entry =
-      await getAwaitingAffiliateItem();
+      await getAwaitingAffiliateItem(
+        group
+      );
 
     if (!entry) {
-      return;
+      return false;
     }
 
     // Bloqueia ANTES da chamada. Se outro trigger local ocorrer
@@ -1162,23 +1301,28 @@ async function fillNextAffiliateLink(
       );
     }
 
-    await sock.sendMessage(
-      routing
-        .controlGroup
-        .jid,
-      {
-        text:
-          "🔗 *LINK AFILIADO GERADO AUTOMATICAMENTE*\n\n" +
-          `${entry.title}\n` +
-          `${generated.shortUrl}\n\n` +
-          "✅ Validado e movido para ready_to_publish."
-      }
-    );
+    if (
+      !batchMode
+    ) {
+      await sock.sendMessage(
+        routing
+          .controlGroup
+          .jid,
+        {
+          text:
+            "🔗 *LINK AFILIADO GERADO AUTOMATICAMENTE*\n\n" +
+            `${entry.title}\n` +
+            `${generated.shortUrl}\n\n` +
+            "✅ Validado e movido para ready_to_publish."
+        }
+      );
 
-    // Não esperamos o próximo poll.
-    await showNextPreview(
-      sock
-    );
+      await showNextPreview(
+        sock
+      );
+    }
+
+    return true;
   } catch (error) {
     if (
       error instanceof
@@ -1197,7 +1341,7 @@ async function fillNextAffiliateLink(
         error.message
       );
 
-      return;
+      return false;
     }
 
     console.error(
@@ -1230,6 +1374,8 @@ async function fillNextAffiliateLink(
           "A oferta permaneceu aguardando link."
       }
     );
+
+    return false;
   } finally {
     affiliateFillInProgress =
       false;
@@ -1629,6 +1775,348 @@ async function handleAffiliateLinksFromControl(
           )
       }
     );
+  }
+}
+
+
+async function sendEntryAutomatically(
+  sock,
+  entry,
+  group
+) {
+  const destination =
+    resolveDestination(
+      entry
+    );
+
+  if (!destination) {
+    return false;
+  }
+
+  try {
+    await setStatus(
+      entry.itemId,
+      "sending",
+      {
+        groupJid:
+          destination.jid,
+
+        groupName:
+          destination.name
+      }
+    );
+
+    const imageBuffer =
+      await downloadImage(
+        entry
+          .whatsappPayload
+          ?.image
+      );
+
+    const sent =
+      await sock.sendMessage(
+        destination.jid,
+        {
+          image:
+            imageBuffer,
+
+          caption:
+            entry
+              .whatsappPayload
+              ?.caption ||
+            entry.messageDraft ||
+            ""
+        }
+      );
+
+    await setStatus(
+      entry.itemId,
+      "sent",
+      {
+        groupJid:
+          destination.jid,
+
+        groupName:
+          destination.name,
+
+        whatsappMessageId:
+          sent?.key?.id ||
+          null
+      }
+    );
+
+    rememberHandled(
+      recentSentProducts,
+      entry,
+      RECENT_OPERATION_TTL_MS
+    );
+
+    rememberHandled(
+      recentPreviewProducts,
+      entry,
+      RECENT_OPERATION_TTL_MS
+    );
+
+    rememberHandled(
+      recentAffiliateProducts,
+      entry,
+      RECENT_OPERATION_TTL_MS
+    );
+
+    const label =
+      AUTO_BATCH_LABELS[
+        group
+      ]?.label ||
+      group;
+
+    console.log(
+      `🤖 Lote ${label}: Sent → ${entry.title}`
+    );
+
+    return true;
+  } catch (error) {
+    try {
+      await setStatus(
+        entry.itemId,
+        "send_error",
+        {
+          groupJid:
+            destination.jid,
+
+          groupName:
+            destination.name,
+
+          errorMessage:
+            error?.message ||
+            "Erro desconhecido."
+        }
+      );
+    } catch {
+      // Não derruba o ciclo se falhar ao registrar o erro.
+    }
+
+    console.error(
+      `❌ Lote ${group}:`,
+      error?.message ||
+      error
+    );
+
+    return false;
+  }
+}
+
+async function processAutomaticBatchGroup(
+  sock,
+  group
+) {
+  const meta =
+    AUTO_BATCH_LABELS[
+      group
+    ];
+
+  if (!meta) {
+    return 0;
+  }
+
+  console.log(
+    `${meta.emoji} Lote iniciado: ${meta.label} (máx. ${AUTO_BATCH_SIZE})`
+  );
+
+  try {
+    await runAutoDiscovery({
+      group
+    });
+  } catch (error) {
+    console.error(
+      `⚠️ Descoberta ${meta.label}:`,
+      error?.message ||
+      error
+    );
+  }
+
+  let sentCount =
+    0;
+
+  while (
+    sentCount <
+    AUTO_BATCH_SIZE
+  ) {
+    let entry =
+      await getReadyItem(
+        group,
+        {
+          ignorePreviewMemory:
+            true
+        }
+      );
+
+    if (!entry) {
+      const generated =
+        await fillNextAffiliateLink(
+          sock,
+          {
+            group,
+            batchMode:
+              true
+          }
+        );
+
+      if (!generated) {
+        break;
+      }
+
+      entry =
+        await getReadyItem(
+          group,
+          {
+            ignorePreviewMemory:
+              true
+          }
+        );
+    }
+
+    if (!entry) {
+      break;
+    }
+
+    const sent =
+      await sendEntryAutomatically(
+        sock,
+        entry,
+        group
+      );
+
+    if (!sent) {
+      rememberHandled(
+        recentSentProducts,
+        entry,
+        60000
+      );
+
+      continue;
+    }
+
+    sentCount +=
+      1;
+
+    await sleep(
+      2500
+    );
+  }
+
+  console.log(
+    `${meta.emoji} Lote concluído: ${meta.label} → ${sentCount}/${AUTO_BATCH_SIZE}`
+  );
+
+  return sentCount;
+}
+
+async function runAutomaticBatchCycle(
+  sock
+) {
+  if (
+    !AUTO_BATCH_ENABLED ||
+    automaticBatchInProgress
+  ) {
+    return;
+  }
+
+  automaticBatchInProgress =
+    true;
+
+  const counts = {
+    eletronicos:
+      0,
+
+    fitness:
+      0,
+
+    perfumes:
+      0
+  };
+
+  try {
+    console.log("");
+    console.log(
+      "🤖 ===== CICLO AUTOMÁTICO T&T ====="
+    );
+    console.log(
+      `🎯 Meta: até ${AUTO_BATCH_SIZE} por grupo`
+    );
+
+    for (
+      const group of
+      AUTO_BATCH_GROUPS
+    ) {
+      counts[
+        group
+      ] =
+        await processAutomaticBatchGroup(
+          sock,
+          group
+        );
+    }
+
+    const total =
+      Object
+        .values(
+          counts
+        )
+        .reduce(
+          (
+            sum,
+            value
+          ) =>
+            sum +
+            value,
+          0
+        );
+
+    console.log(
+      `✅ Ciclo finalizado: Eletrônicos ${counts.eletronicos}/${AUTO_BATCH_SIZE} | Fitness ${counts.fitness}/${AUTO_BATCH_SIZE} | Perfumes ${counts.perfumes}/${AUTO_BATCH_SIZE}`
+    );
+    console.log(
+      `⏸️ Pausa: ${Math.round(AUTO_BATCH_PAUSE_MS / 60000)} min`
+    );
+
+    await sock.sendMessage(
+      routing
+        .controlGroup
+        .jid,
+      {
+        text:
+          "🤖 *CICLO AUTOMÁTICO T&T CONCLUÍDO*\\n\\n" +
+          `📱 Eletrônicos: ${counts.eletronicos}/${AUTO_BATCH_SIZE}\\n` +
+          `💪 Fitness: ${counts.fitness}/${AUTO_BATCH_SIZE}\\n` +
+          `🌸 Perfumes: ${counts.perfumes}/${AUTO_BATCH_SIZE}\\n\\n` +
+          `📤 Total enviado: ${total}\\n` +
+          `⏸️ Próximo ciclo em ${Math.round(AUTO_BATCH_PAUSE_MS / 60000)} minutos.`
+      }
+    );
+  } catch (error) {
+    console.error(
+      "❌ Erro no ciclo automático:",
+      error?.message ||
+      error
+    );
+  } finally {
+    automaticBatchInProgress =
+      false;
+
+    if (
+      AUTO_BATCH_ENABLED
+    ) {
+      scheduleTimeout(
+        () => {
+          runAutomaticBatchCycle(
+            sock
+          ).catch(
+            console.error
+          );
+        },
+        AUTO_BATCH_PAUSE_MS
+      );
+    }
   }
 }
 
@@ -2137,6 +2625,19 @@ async function start() {
               : "🔎 Discovery interval: desligado"
           );
           console.log(
+            `🤖 Lote automático: ${AUTO_BATCH_ENABLED ? "SIM" : "NÃO"}`
+          );
+          if (
+            AUTO_BATCH_ENABLED
+          ) {
+            console.log(
+              `📦 Lote: até ${AUTO_BATCH_SIZE} por grupo`
+            );
+            console.log(
+              `⏸️ Pausa após ciclo: ${AUTO_BATCH_PAUSE_MS} ms`
+            );
+          }
+          console.log(
             `🔗 Auto affiliate: ${AUTO_AFFILIATE_ENABLED ? "SIM" : "NÃO"}`
           );
 
@@ -2188,30 +2689,39 @@ async function start() {
             );
           }
 
-          await showNextPreview(
-            sock
-          );
-
           if (
-            AUTO_DISCOVERY_ENABLED
+            AUTO_BATCH_ENABLED
           ) {
-            triggerAutoDiscovery(
+            runAutomaticBatchCycle(
               sock
             ).catch(
               console.error
             );
-          }
-
-
-          if (
-            AUTO_AFFILIATE_ENABLED &&
-            affiliateSessionConfigured()
-          ) {
-            fillNextAffiliateLink(
+          } else {
+            await showNextPreview(
               sock
-            ).catch(
-              console.error
             );
+
+            if (
+              AUTO_DISCOVERY_ENABLED
+            ) {
+              triggerAutoDiscovery(
+                sock
+              ).catch(
+                console.error
+              );
+            }
+
+            if (
+              AUTO_AFFILIATE_ENABLED &&
+              affiliateSessionConfigured()
+            ) {
+              fillNextAffiliateLink(
+                sock
+              ).catch(
+                console.error
+              );
+            }
           }
         } catch (error) {
           console.error(
@@ -2480,45 +2990,49 @@ async function start() {
     }
   );
 
-  scheduleInterval(
-    () => {
-      showNextPreview(
-        sock
-      ).catch(
-        console.error
+  if (
+    !AUTO_BATCH_ENABLED
+  ) {
+    scheduleInterval(
+      () => {
+        showNextPreview(
+          sock
+        ).catch(
+          console.error
+        );
+      },
+      POLL_INTERVAL_MS
+    );
+
+    if (
+      AUTO_DISCOVERY_ENABLED
+    ) {
+      scheduleInterval(
+        () => {
+          triggerAutoDiscovery(
+            sock
+          ).catch(
+            console.error
+          );
+        },
+        AUTO_DISCOVERY_INTERVAL_MS
       );
-    },
-    POLL_INTERVAL_MS
-  );
+    }
 
-  if (
-    AUTO_DISCOVERY_ENABLED
-  ) {
-    scheduleInterval(
-      () => {
-        triggerAutoDiscovery(
-          sock
-        ).catch(
-          console.error
-        );
-      },
-      AUTO_DISCOVERY_INTERVAL_MS
-    );
-  }
-
-  if (
-    AUTO_AFFILIATE_ENABLED
-  ) {
-    scheduleInterval(
-      () => {
-        fillNextAffiliateLink(
-          sock
-        ).catch(
-          console.error
-        );
-      },
-      AUTO_AFFILIATE_INTERVAL_MS
-    );
+    if (
+      AUTO_AFFILIATE_ENABLED
+    ) {
+      scheduleInterval(
+        () => {
+          fillNextAffiliateLink(
+            sock
+          ).catch(
+            console.error
+          );
+        },
+        AUTO_AFFILIATE_INTERVAL_MS
+      );
+    }
   }
 
   return sock;

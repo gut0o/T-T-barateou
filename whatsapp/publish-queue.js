@@ -419,6 +419,34 @@ function discoverGroupCommand(
     return "eletronicos";
   }
 
+  if (
+    value ===
+      "descobrir fitness" ||
+    value ===
+      "buscar fitness" ||
+    value ===
+      "procurar fitness"
+  ) {
+    return "fitness";
+  }
+
+  if (
+    value ===
+      "descobrir perfumes" ||
+    value ===
+      "descobrir perfume" ||
+    value ===
+      "buscar perfumes" ||
+    value ===
+      "buscar perfume" ||
+    value ===
+      "procurar perfumes" ||
+    value ===
+      "procurar perfume"
+  ) {
+    return "perfumes";
+  }
+
   return null;
 }
 
@@ -1417,12 +1445,44 @@ async function triggerAutoDiscovery(
     true;
 
   try {
+    const targetedLabels = {
+      eletronicos: {
+        emoji:
+          "📱",
+
+        label:
+          "Eletrônicos"
+      },
+
+      fitness: {
+        emoji:
+          "💪",
+
+        label:
+          "Fitness"
+      },
+
+      perfumes: {
+        emoji:
+          "🌸",
+
+        label:
+          "Perfumes"
+      }
+    };
+
+    const targeted =
+      group
+        ? targetedLabels[
+            group
+          ]
+        : null;
+
     if (
-      group ===
-      "eletronicos"
+      targeted
     ) {
       console.log(
-        "📱 Descoberta direcionada: Eletrônicos"
+        `${targeted.emoji} Descoberta direcionada: ${targeted.label}`
       );
 
       await sock.sendMessage(
@@ -1431,7 +1491,7 @@ async function triggerAutoDiscovery(
           .jid,
         {
           text:
-            "📱 Buscando ofertas de *Eletrônicos*..."
+            `${targeted.emoji} Buscando ofertas de *${targeted.label}*...`
         }
       );
     } else {
@@ -2100,7 +2160,7 @@ async function start() {
             );
           }
           console.log(
-            `💬 Comandos em ${routing.controlGroup.name}: STATUS | DESCOBRIR | DESCOBRIR ELETRONICOS | cole um meli.la`
+            `💬 Comandos em ${routing.controlGroup.name}: STATUS | DESCOBRIR | DESCOBRIR ELETRONICOS | DESCOBRIR FITNESS | DESCOBRIR PERFUMES | cole um meli.la`
           );
           console.log(
             "🛑 Ctrl + C para parar.\n"

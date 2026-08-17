@@ -278,6 +278,108 @@ function sortShortlist(
     );
 }
 
+async function predictCategory({
+  accessToken,
+  query
+}) {
+  const normalizedQuery =
+    String(
+      query || ""
+    )
+      .trim();
+
+  if (!normalizedQuery) {
+    return null;
+  }
+
+  const url =
+    new URL(
+      "https://api.mercadolibre.com/sites/MLB/domain_discovery/search"
+    );
+
+  url.searchParams.set(
+    "limit",
+    "1"
+  );
+
+  url.searchParams.set(
+    "q",
+    normalizedQuery
+  );
+
+  const response =
+    await fetch(
+      url,
+      {
+        method:
+          "GET",
+
+        headers: {
+          Accept:
+            "application/json",
+
+          Authorization:
+            `Bearer ${accessToken}`
+        }
+      }
+    );
+
+  let payload =
+    null;
+
+  try {
+    payload =
+      await response.json();
+  } catch {
+    payload =
+      null;
+  }
+
+  const first =
+    Array.isArray(
+      payload
+    )
+      ? payload[0]
+      : null;
+
+  if (
+    !response.ok ||
+    !first?.category_id
+  ) {
+    const error =
+      new Error(
+        `Não consegui descobrir a categoria do Mercado Livre para "${normalizedQuery}".`
+      );
+
+    error.statusCode =
+      response.status >= 400
+        ? response.status
+        : 502;
+
+    throw error;
+  }
+
+  return {
+    query:
+      normalizedQuery,
+
+    categoryId:
+      first.category_id,
+
+    categoryName:
+      first.category_name ||
+      null,
+
+    domainId:
+      first.domain_id ||
+      null,
+
+    domainName:
+      first.domain_name ||
+      null
+  };
+}
+
 export default async function handler(
   req,
   res
@@ -545,6 +647,41 @@ export default async function handler(
     const tokenData =
       await getValidMlTokenData();
 
+    const categoryQuery =
+      String(
+        req.query
+          ?.categoryQuery ||
+        ""
+      )
+        .trim();
+
+    let categoryPrediction =
+      null;
+
+    let discoveryCategoryId =
+      req.query
+        ?.categoryId ||
+      null;
+
+    if (
+      !discoveryCategoryId &&
+      categoryQuery
+    ) {
+      categoryPrediction =
+        await predictCategory({
+          accessToken:
+            tokenData
+              .access_token,
+
+          query:
+            categoryQuery
+        });
+
+      discoveryCategoryId =
+        categoryPrediction
+          .categoryId;
+    }
+
     const result =
       await discoverBestSellers({
         accessToken:
@@ -552,9 +689,7 @@ export default async function handler(
             .access_token,
 
         categoryId:
-          req.query
-            ?.categoryId ||
-          null
+          discoveryCategoryId
       });
 
     if (
@@ -705,6 +840,24 @@ export default async function handler(
       .status(200)
       .json({
         ...result,
+
+        discoveryCategory: {
+          requestedCategoryId:
+            req.query
+              ?.categoryId ||
+            null,
+
+          requestedCategoryQuery:
+            categoryQuery ||
+            null,
+
+          resolvedCategoryId:
+            discoveryCategoryId ||
+            null,
+
+          prediction:
+            categoryPrediction
+        },
 
         discoveryStrategy:
           "top20_then_first_5_catalog_products",

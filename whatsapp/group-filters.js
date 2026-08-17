@@ -41,12 +41,27 @@ function includesAny(
   );
 }
 
+
+function includesPerfumeAbbreviation(
+  text
+) {
+  return (
+    /(^|[\s\-\/])(edt|edp)(?=$|[\s\-\/0-9])/i
+      .test(
+        text
+      )
+  );
+}
+
 const PERFUME_TERMS = [
   "perfume",
+  "parfum",
   "eau de parfum",
   "eau de toilette",
   "eau de cologne",
   "deo parfum",
+  "deo colonia",
+  "desodorante colonia",
   "fragrancia",
   "colonia",
   "body splash"
@@ -119,9 +134,14 @@ function perfumeDestination(
 
   if (
     !title ||
-    !includesAny(
-      title,
-      PERFUME_TERMS
+    (
+      !includesAny(
+        title,
+        PERFUME_TERMS
+      ) &&
+      !includesPerfumeAbbreviation(
+        title
+      )
     ) ||
     includesAny(
       title,

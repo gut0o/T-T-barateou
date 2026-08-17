@@ -399,6 +399,29 @@ function isDiscoverCommand(text) {
   );
 }
 
+
+function discoverGroupCommand(
+  text
+) {
+  const value =
+    normalizeAnswer(
+      text
+    );
+
+  if (
+    value ===
+      "descobrir eletronicos" ||
+    value ===
+      "buscar eletronicos" ||
+    value ===
+      "procurar eletronicos"
+  ) {
+    return "eletronicos";
+  }
+
+  return null;
+}
+
 function extractAffiliateLinks(text) {
   const matches =
     String(text || "")
@@ -791,20 +814,37 @@ async function attachAffiliateLink({
   );
 }
 
-async function runAutoDiscovery() {
+async function runAutoDiscovery({
+  group = null
+} = {}) {
+  const targeted =
+    Boolean(
+      group
+    );
+
   const result =
     await apiPost(
       "auto-discover",
       {
         cursor:
-          discoveryCursor,
+          targeted
+            ? 0
+            : discoveryCursor,
 
         limit:
-          2
+          targeted
+            ? 1
+            : 2,
+
+        group:
+          group ||
+          null
       }
     );
 
+  // A busca direcionada não mexe no cursor da busca automática.
   if (
+    !targeted &&
     typeof result
       ?.nextCursor ===
       "number"
@@ -1361,7 +1401,10 @@ async function notifyAutoDiscovery(
 }
 
 async function triggerAutoDiscovery(
-  sock
+  sock,
+  {
+    group = null
+  } = {}
 ) {
   if (
     actionInProgress ||
@@ -1374,12 +1417,33 @@ async function triggerAutoDiscovery(
     true;
 
   try {
-    console.log(
-      `🔎 Descoberta automática iniciada. Cursor: ${discoveryCursor}`
-    );
+    if (
+      group ===
+      "eletronicos"
+    ) {
+      console.log(
+        "📱 Descoberta direcionada: Eletrônicos"
+      );
+
+      await sock.sendMessage(
+        routing
+          .controlGroup
+          .jid,
+        {
+          text:
+            "📱 Buscando ofertas de *Eletrônicos*..."
+        }
+      );
+    } else {
+      console.log(
+        `🔎 Descoberta automática iniciada. Cursor: ${discoveryCursor}`
+      );
+    }
 
     const result =
-      await runAutoDiscovery();
+      await runAutoDiscovery({
+        group
+      });
 
     await notifyAutoDiscovery(
       sock,
@@ -2036,7 +2100,7 @@ async function start() {
             );
           }
           console.log(
-            `💬 Comandos em ${routing.controlGroup.name}: STATUS | DESCOBRIR | cole um meli.la`
+            `💬 Comandos em ${routing.controlGroup.name}: STATUS | DESCOBRIR | DESCOBRIR ELETRONICOS | cole um meli.la`
           );
           console.log(
             "🛑 Ctrl + C para parar.\n"
@@ -2263,6 +2327,25 @@ async function start() {
           ) {
             await sendQueueSummary(
               sock
+            );
+
+            continue;
+          }
+
+          const discoverGroup =
+            discoverGroupCommand(
+              text
+            );
+
+          if (
+            discoverGroup
+          ) {
+            await triggerAutoDiscovery(
+              sock,
+              {
+                group:
+                  discoverGroup
+              }
             );
 
             continue;

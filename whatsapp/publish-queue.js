@@ -1293,7 +1293,10 @@ async function fillNextAffiliateLink(
           entry.productId,
 
         catalogPageUrl:
-          entry.catalogPageUrl
+          entry.catalogPageUrl,
+
+        title:
+          entry.title
       });
 
     console.log(

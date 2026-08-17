@@ -266,6 +266,83 @@ function uniqueStrings(
   );
 }
 
+
+function slugifyProductTitle(
+  title
+) {
+  const slug =
+    String(
+      title ||
+      ""
+    )
+      .trim()
+      .toLocaleLowerCase(
+        "pt-BR"
+      )
+      .normalize(
+        "NFD"
+      )
+      .replace(
+        /[\u0300-\u036f]/g,
+        ""
+      )
+      .replace(
+        /®|™/g,
+        ""
+      )
+      .replace(
+        /[^a-z0-9]+/g,
+        "-"
+      )
+      .replace(
+        /^-+|-+$/g,
+        ""
+      )
+      .slice(
+        0,
+        120
+      )
+      .replace(
+        /-+$/g,
+        ""
+      );
+
+  return (
+    slug ||
+    "produto"
+  );
+}
+
+function buildSeoProductUrl({
+  productId,
+  title
+}) {
+  const safeProductId =
+    String(
+      productId ||
+      ""
+    )
+      .trim()
+      .toUpperCase();
+
+  if (
+    !/^MLB\d+$/.test(
+      safeProductId
+    )
+  ) {
+    return null;
+  }
+
+  return (
+    "https://www.mercadolivre.com.br/" +
+    slugifyProductTitle(
+      title
+    ) +
+    "/p/" +
+    safeProductId
+  );
+}
+
 function extractShortUrl(
   body
 ) {
@@ -354,7 +431,8 @@ export class AffiliateSessionError extends Error {
 export async function createAffiliateLink({
   itemId,
   productId,
-  catalogPageUrl
+  catalogPageUrl,
+  title = null
 }) {
   if (
     !affiliateSessionConfigured()
@@ -404,8 +482,23 @@ export async function createAffiliateLink({
   //
   // Isso replica melhor o comportamento observado no navegador e
   // evita enviar /gz/account-verification ao programa de afiliados.
+  const seoUrl =
+    buildSeoProductUrl({
+      productId,
+      title
+    });
+
+  // O endpoint interno de afiliados observado no navegador recebe
+  // normalmente a URL SEO completa:
+  //
+  // mercadolivre.com.br/nome-do-produto/p/MLB...
+  //
+  // A forma nua /p/MLB... pode ser recusada mesmo apontando para o
+  // mesmo catálogo. Por isso tentamos a URL SEO PRIMEIRO.
   const targetCandidates =
     uniqueStrings([
+      seoUrl,
+
       isAllowedProductUrl(
         canonical.url,
         productId
@@ -580,6 +673,25 @@ export async function createAffiliateLink({
         null,
 
       targetUrl,
+
+      targetMode:
+        (
+          seoUrl &&
+          targetCandidate ===
+            seoUrl
+        )
+          ? "seo_synthesized"
+          : (
+              targetCandidate ===
+                canonical.url
+                ? "canonical"
+                : (
+                    targetCandidate ===
+                      initial
+                      ? "initial"
+                      : "bare_product"
+                  )
+            ),
 
       entries:
         safeEntries

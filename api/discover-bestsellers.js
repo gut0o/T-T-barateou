@@ -709,6 +709,19 @@ export default async function handler(
     // estão bloqueados para leitura de detalhes.
     // Em vez de gastar chamadas nesses tipos, percorremos o top 20
     // e selecionamos os primeiros PRODUCTs acessíveis.
+    const scanOffset =
+      Math.max(
+        Math.min(
+          Number(
+            req.query
+              ?.scanOffset ||
+            0
+          ) || 0,
+          100
+        ),
+        0
+      );
+
     const productCandidates =
       result.candidates
         .filter(
@@ -717,8 +730,9 @@ export default async function handler(
             "PRODUCT"
         )
         .slice(
-          0,
-          PRODUCT_SCAN_LIMIT
+          scanOffset,
+          scanOffset +
+            PRODUCT_SCAN_LIMIT
         );
 
     const enrichment =
@@ -867,6 +881,17 @@ export default async function handler(
 
         selectedProductCount:
           productCandidates.length,
+
+        scanOffset,
+
+        scanWindow: {
+          from:
+            scanOffset,
+
+          toExclusive:
+            scanOffset +
+            PRODUCT_SCAN_LIMIT
+        },
 
         enrichmentLimit:
           PRODUCT_SCAN_LIMIT,

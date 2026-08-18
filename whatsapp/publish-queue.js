@@ -190,6 +190,58 @@ let discoveryCursor =
 let automaticBatchInProgress =
   false;
 
+// Socket atualmente válido.
+// Em uma reconexão, o ciclo antigo pode continuar vivo por alguns
+// segundos. Essas referências impedem que ele tente publicar usando
+// o socket já fechado.
+let activeWhatsAppSocket =
+  null;
+
+let whatsappConnectionOpen =
+  false;
+
+function isSocketActive(
+  sock
+) {
+  return Boolean(
+    whatsappConnectionOpen &&
+    activeWhatsAppSocket ===
+      sock
+  );
+}
+
+function isConnectionClosedError(
+  error
+) {
+  const message =
+    String(
+      error?.message ||
+      error ||
+      ""
+    );
+
+  return (
+    error?.code ===
+      "WHATSAPP_CONNECTION_CLOSED" ||
+    /connection closed|socket closed|connection lost|not connected|connection terminated/i
+      .test(
+        message
+      )
+  );
+}
+
+function connectionClosedError() {
+  const error =
+    new Error(
+      "WhatsApp desconectado durante o ciclo."
+    );
+
+  error.code =
+    "WHATSAPP_CONNECTION_CLOSED";
+
+  return error;
+}
+
 // Modo manual:
 // - pausa novos lotes automáticos
 // - mantém o bot conectado
@@ -1088,6 +1140,79 @@ async function getQueueSummary() {
   });
 }
 
+async function recoverConnectionSendErrors() {
+  const response =
+    await apiGet({
+      action:
+        "queue-list",
+
+      status:
+        "send_error",
+
+      limit:
+        100
+    });
+
+  const entries =
+    response
+      ?.queue
+      ?.entries ||
+    [];
+
+  let recovered =
+    0;
+
+  for (
+    const entry of
+    entries
+  ) {
+    const lastError =
+      String(
+        entry
+          ?.delivery
+          ?.lastError ||
+        ""
+      );
+
+    if (
+      !/connection closed|socket closed|connection lost|not connected|connection terminated/i
+        .test(
+          lastError
+        )
+    ) {
+      continue;
+    }
+
+    await setStatus(
+      entry.itemId,
+      "retry",
+      {
+        groupJid:
+          entry
+            ?.delivery
+            ?.groupJid ||
+          null,
+
+        groupName:
+          entry
+            ?.delivery
+            ?.groupName ||
+          null
+      }
+    );
+
+    recovered +=
+      1;
+  }
+
+  return {
+    scanned:
+      entries.length,
+
+    recovered
+  };
+}
+
 
 async function repairQueueDuplicates() {
   return apiGet({
@@ -1527,10 +1652,29 @@ async function fillNextAffiliateLink(
         ?.publicationStatus !==
         "ready_to_publish"
     ) {
-      throw new Error(
-        attached?.error ||
-        "O link foi gerado, mas não passou pela validação do T&T."
-      );
+      const attachError =
+        new Error(
+          attached?.error ||
+          "O link foi gerado, mas não passou pela validação do T&T."
+        );
+
+      if (
+        attached
+          ?.validation
+          ?.reason ===
+        "resolved_to_different_offer"
+      ) {
+        attachError.code =
+          "AFFILIATE_LINK_MISMATCH";
+
+        attachError.permanent =
+          true;
+
+        attachError.safeReason =
+          "O link afiliado resolveu para outro produto.";
+      }
+
+      throw attachError;
     }
 
     if (
@@ -1593,8 +1737,6 @@ async function fillNextAffiliateLink(
     const affiliateProgramRejected =
       error?.code ===
         "AFFILIATE_URL_NOT_ALLOWED" ||
-      error?.permanent ===
-        true ||
       /url not allowed in affiliates program/i
         .test(
           String(
@@ -1603,8 +1745,16 @@ async function fillNextAffiliateLink(
           )
         );
 
+    const affiliateLinkMismatch =
+      error?.code ===
+        "AFFILIATE_LINK_MISMATCH";
+
+    const permanentAffiliateRejection =
+      affiliateProgramRejected ||
+      affiliateLinkMismatch;
+
     if (
-      affiliateProgramRejected &&
+      permanentAffiliateRejection &&
       entry?.itemId
     ) {
       try {
@@ -1613,7 +1763,9 @@ async function fillNextAffiliateLink(
           "rejected",
           {
             errorMessage:
-              "Mercado Livre informou: URL not allowed in affiliates program."
+              affiliateLinkMismatch
+                ? "Link afiliado resolveu para produto diferente do enfileirado."
+                : "Mercado Livre informou: URL not allowed in affiliates program."
           }
         );
 
@@ -1627,18 +1779,36 @@ async function fillNextAffiliateLink(
           `🚫 Rejeitada definitivamente para afiliados: ${entry.title || entry.itemId}`
         );
 
-        await sock.sendMessage(
-          routing
-            .controlGroup
-            .jid,
-          {
-            text:
-              "🚫 *OFERTA REJEITADA PELO PROGRAMA DE AFILIADOS*\n\n" +
-              `${entry.title || entry.itemId}\n\n` +
-              "O Mercado Livre informou que essa URL não é permitida no programa. " +
-              "Ela foi marcada como *rejected* e não será tentada novamente."
+        if (
+          isSocketActive(
+            sock
+          )
+        ) {
+          try {
+            await sock.sendMessage(
+              routing
+                .controlGroup
+                .jid,
+              {
+                text:
+                  "🚫 *OFERTA REJEITADA PARA PUBLICAÇÃO*\n\n" +
+                  `${entry.title || entry.itemId}\n\n` +
+                  (
+                    affiliateLinkMismatch
+                      ? "O link afiliado resolveu para um produto diferente do enfileirado."
+                      : "O Mercado Livre informou que essa URL não é permitida no programa."
+                  ) +
+                  "\n\nEla foi marcada como *rejected* e não será tentada novamente."
+              }
+            );
+          } catch (
+            notificationError
+          ) {
+            console.log(
+              "⚠️ Rejeição salva; aviso ao grupo de controle não pôde ser enviado."
+            );
           }
-        );
+        }
 
         return false;
       } catch (rejectError) {
@@ -1662,17 +1832,27 @@ async function fillNextAffiliateLink(
       );
     }
 
-    await sock.sendMessage(
-      routing
-        .controlGroup
-        .jid,
-      {
-        text:
-          "❌ Não consegui gerar/validar o link afiliado para uma oferta.\n\n" +
-          `${error?.message || "Erro desconhecido."}\n\n` +
-          "A oferta permaneceu aguardando link porque o erro não foi classificado como rejeição definitiva."
+    if (
+      isSocketActive(
+        sock
+      )
+    ) {
+      try {
+        await sock.sendMessage(
+          routing
+            .controlGroup
+            .jid,
+          {
+            text:
+              "❌ Não consegui gerar/validar o link afiliado para uma oferta.\n\n" +
+              `${error?.message || "Erro desconhecido."}\n\n` +
+              "A oferta permaneceu aguardando link porque o erro não foi classificado como rejeição definitiva."
+          }
+        );
+      } catch {
+        // A falha ao avisar o grupo não pode derrubar o ciclo.
       }
-    );
+    }
 
     return false;
   } finally {
@@ -2199,6 +2379,14 @@ async function sendEntryAutomatically(
   }
 
   try {
+    if (
+      !isSocketActive(
+        sock
+      )
+    ) {
+      throw connectionClosedError();
+    }
+
     await setStatus(
       entry.itemId,
       "sending",
@@ -2280,6 +2468,45 @@ async function sendEntryAutomatically(
 
     return true;
   } catch (error) {
+    if (
+      isConnectionClosedError(
+        error
+      ) ||
+      !isSocketActive(
+        sock
+      )
+    ) {
+      try {
+        // Não é erro da oferta. A conexão caiu.
+        // Volta para ready_to_publish para ser enviada após reconectar.
+        await setStatus(
+          entry.itemId,
+          "retry",
+          {
+            groupJid:
+              destination.jid,
+
+            groupName:
+              destination.name
+          }
+        );
+
+        console.log(
+          `🔄 WhatsApp caiu; oferta devolvida para ready_to_publish: ${entry.title}`
+        );
+      } catch (
+        retryError
+      ) {
+        console.error(
+          "⚠️ Não consegui devolver a oferta para ready_to_publish:",
+          retryError?.message ||
+          retryError
+        );
+      }
+
+      throw connectionClosedError();
+    }
+
     try {
       await setStatus(
         entry.itemId,
@@ -2491,6 +2718,14 @@ async function processAutomaticBatchGroup(
     sentCount <
     AUTO_BATCH_SIZE
   ) {
+    if (
+      !isSocketActive(
+        sock
+      )
+    ) {
+      throw connectionClosedError();
+    }
+
     if (
       manualModeEnabled
     ) {
@@ -2776,18 +3011,31 @@ async function runAutomaticBatchCycle(
       }
     );
   } catch (error) {
-    console.error(
-      "❌ Erro no ciclo automático:",
-      error?.message ||
-      error
-    );
+    if (
+      isConnectionClosedError(
+        error
+      )
+    ) {
+      console.log(
+        "🔌 Ciclo automático interrompido porque o WhatsApp desconectou. Ele continuará após a reconexão."
+      );
+    } else {
+      console.error(
+        "❌ Erro no ciclo automático:",
+        error?.message ||
+        error
+      );
+    }
   } finally {
     automaticBatchInProgress =
       false;
 
     if (
       AUTO_BATCH_ENABLED &&
-      !manualModeEnabled
+      !manualModeEnabled &&
+      isSocketActive(
+        sock
+      )
     ) {
       scheduleTimeout(
         () => {
@@ -3210,6 +3458,37 @@ async function validateControlGroup(
   return metadata;
 }
 
+async function resumeAutomaticBatchWhenReady(
+  sock
+) {
+  // Se um ciclo do socket antigo ainda está finalizando, aguarda.
+  while (
+    isSocketActive(
+      sock
+    ) &&
+    automaticBatchInProgress
+  ) {
+    await sleep(
+      500
+    );
+  }
+
+  if (
+    !isSocketActive(
+      sock
+    ) ||
+    !AUTO_BATCH_ENABLED ||
+    manualModeEnabled
+  ) {
+    return;
+  }
+
+  await runAutomaticBatchCycle(
+    sock
+  );
+}
+
+
 async function start() {
   routing =
     await loadRouting();
@@ -3269,6 +3548,12 @@ async function start() {
         connection ===
         "open"
       ) {
+        activeWhatsAppSocket =
+          sock;
+
+        whatsappConnectionOpen =
+          true;
+
         try {
           const control =
             await validateControlGroup(
@@ -3385,6 +3670,25 @@ async function start() {
             AUTO_BATCH_ENABLED
           ) {
             try {
+              const recovery =
+                await recoverConnectionSendErrors();
+
+              if (
+                recovery.recovered > 0
+              ) {
+                console.log(
+                  `🔄 Recuperação pós-conexão: ${recovery.recovered} oferta(s) devolvida(s) para ready_to_publish.`
+                );
+              }
+            } catch (error) {
+              console.error(
+                "⚠️ Não consegui recuperar send_error de conexão:",
+                error?.message ||
+                error
+              );
+            }
+
+            try {
               const restored =
                 await loadAutomaticGroupCursors();
 
@@ -3399,7 +3703,7 @@ async function start() {
               );
             }
 
-            runAutomaticBatchCycle(
+            resumeAutomaticBatchWhenReady(
               sock
             ).catch(
               console.error
@@ -3443,6 +3747,17 @@ async function start() {
         connection ===
         "close"
       ) {
+        if (
+          activeWhatsAppSocket ===
+          sock
+        ) {
+          whatsappConnectionOpen =
+            false;
+
+          activeWhatsAppSocket =
+            null;
+        }
+
         const statusCode =
           lastDisconnect
             ?.error

@@ -1738,7 +1738,7 @@ async function notifyAutoDiscovery(
   const lines = [
     `🔎 *T&T encontrou ${newOffers.length} oferta(s) dentro dos filtros*`,
     "",
-    "Elas passaram pela regra high/medium e pertencem a um dos grupos ativos."
+    "Elas pertencem a um dos grupos ativos e passaram pela validação básica de dados."
   ];
 
   if (
@@ -2035,7 +2035,7 @@ async function handleAffiliateLinksFromControl(
       "🔗 *RESULTADO DOS LINKS*",
       "",
       `✅ Prontas: ${result.readyCount || 0}`,
-      `⏸️ Seguradas: ${result.heldCount || 0}`,
+      `⏸️ Ignoradas por dados/limite: ${result.heldCount || 0}`,
       `❌ Falhas: ${result.failedCount || 0}`
     ];
 
@@ -2054,14 +2054,14 @@ async function handleAffiliateLinksFromControl(
         "ready_to_publish"
       ) {
         lines.push(
-          `✅ ${item.priority || ""} → pronta para publicação`
+          `✅ ${item.title || item.itemId || "Oferta"} → pronta para publicação`
         );
       } else if (
         item.status ===
         "held"
       ) {
         lines.push(
-          `⏸️ ${item.priority || ""} → ${item.heldReason || "segurada"}`
+          `⏸️ ${item.title || item.itemId || "Oferta"} → ${item.heldReason || "ignorada"}`
         );
       } else {
         lines.push(

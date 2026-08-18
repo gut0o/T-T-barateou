@@ -15,10 +15,6 @@ import {
 } from "../lib/ml-offer-category-enrichment.js";
 
 import {
-  calculateOfferScore
-} from "../lib/offer-scoring.js";
-
-import {
   routeToTtCategory
 } from "../lib/tt-category-routing.js";
 
@@ -57,45 +53,6 @@ function queryFlag(value) {
   );
 }
 
-function estimateCommissionValue(
-  price,
-  percent
-) {
-  if (
-    typeof price !== "number" ||
-    !Number.isFinite(price) ||
-    typeof percent !== "number" ||
-    !Number.isFinite(percent)
-  ) {
-    return null;
-  }
-
-  return Number(
-    (
-      price *
-      (percent / 100)
-    ).toFixed(2)
-  );
-}
-
-function priorityWeight(
-  priority
-) {
-  if (priority === "high") {
-    return 3;
-  }
-
-  if (priority === "medium") {
-    return 2;
-  }
-
-  if (priority === "low") {
-    return 1;
-  }
-
-  return 0;
-}
-
 async function buildAnalyzedCandidate({
   candidate,
   accessToken
@@ -111,6 +68,9 @@ async function buildAnalyzedCandidate({
     };
   }
 
+  // A resolução de categoria continua necessária para saber
+  // para qual grupo T&T o produto deve ir.
+  // Score e prioridade não participam mais da decisão.
   const category =
     await enrichOfferCategoryAndCommission({
       categoryId:
@@ -129,32 +89,6 @@ async function buildAnalyzedCandidate({
         null,
 
       accessToken
-    });
-
-  const estimatedDirectCommission =
-    estimateCommissionValue(
-      candidate.price,
-      category
-        .directCommissionPercent
-    );
-
-  const estimatedIndirectCommission =
-    estimateCommissionValue(
-      candidate.price,
-      category
-        .indirectCommissionPercent
-    );
-
-  const scoring =
-    calculateOfferScore({
-      discount:
-        candidate.discount,
-
-      directCommissionPercent:
-        category
-          .directCommissionPercent,
-
-      estimatedDirectCommission
     });
 
   const routing =
@@ -188,36 +122,6 @@ async function buildAnalyzedCandidate({
     resolvedCategoryName:
       category.categoryName,
 
-    commissionKnown:
-      category.commissionKnown,
-
-    directCommissionPercent:
-      category
-        .directCommissionPercent,
-
-    indirectCommissionPercent:
-      category
-        .indirectCommissionPercent,
-
-    estimatedDirectCommission,
-
-    estimatedIndirectCommission,
-
-    offerScore:
-      scoring.offerScore,
-
-    priority:
-      scoring.priority,
-
-    scoreStatus:
-      scoring.scoreStatus,
-
-    scoreBreakdown:
-      scoring.scoreBreakdown,
-
-    scoreVersion:
-      scoring.scoreVersion,
-
     ttCategoryId:
       routing.ttCategoryId,
 
@@ -230,6 +134,9 @@ async function buildAnalyzedCandidate({
     ttRoutingKnown:
       routing.ttRoutingKnown,
 
+    selectionRule:
+      "category_only",
+
     automationReadiness:
       hasCoreOfferData
         ? "ready_for_next_stage"
@@ -240,41 +147,20 @@ async function buildAnalyzedCandidate({
 function sortShortlist(
   candidates
 ) {
+  // Sem score e sem prioridade:
+  // respeita somente a ordem do ranking do Mercado Livre.
   return candidates
     .slice()
     .sort(
-      (a, b) => {
-        const priorityDiff =
-          priorityWeight(
-            b.priority
-          ) -
-          priorityWeight(
-            a.priority
-          );
-
-        if (priorityDiff) {
-          return priorityDiff;
-        }
-
-        const aScore =
-          typeof a.offerScore === "number"
-            ? a.offerScore
-            : -1;
-
-        const bScore =
-          typeof b.offerScore === "number"
-            ? b.offerScore
-            : -1;
-
-        if (bScore !== aScore) {
-          return bScore - aScore;
-        }
-
-        return (
-          (a.rank ?? 999) -
-          (b.rank ?? 999)
-        );
-      }
+      (a, b) =>
+        (
+          a.rank ??
+          999
+        ) -
+        (
+          b.rank ??
+          999
+        )
     );
 }
 
@@ -933,7 +819,7 @@ export default async function handler(
             : "try_another_leaf_category",
 
         note:
-          "O T&T descobre, analisa, seleciona até 3 ofertas high/medium, monta a mensagem pronta e, com queue=1, grava uma fila privada sem duplicar produtos. O link afiliado e o envio ao WhatsApp continuam pendentes."
+          "O T&T descobre produtos, valida os dados mínimos, roteia pela categoria e seleciona até 3 sem usar score ou prioridade. Com queue=1, grava a fila sem duplicar produtos."
       });
   } catch (error) {
     return res

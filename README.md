@@ -1,119 +1,52 @@
-# T&T Barateou — 6.15 Anti-duplicação
+# T&T — Etapa 6.18H — cursores persistidos no Supabase
 
-Corrige o caso em que o mesmo produto apareceu duas vezes.
+Esta etapa só persiste os cursores. Não altera pools, filtros, links afiliados
+nem destinos.
 
-## Causa 1 — itemId não representa necessariamente o produto
-
-Antes:
-
-```text
-dedupe = itemId
-```
-
-Um mesmo PRODUCT de catálogo pode ter um item representante diferente
-quando o seller/preço muda.
-
-Agora:
+Arquitetura:
 
 ```text
-productId disponível
-→ dedupe por productId
-
-sem productId
-→ fallback por itemId
+publish-queue.js local
+    ↓ x-tt-admin-key
+/api/app-state no Vercel
+    ↓ SUPABASE_SECRET_KEY server-side
+tt_app_state no Supabase
 ```
 
-Se o produto já estiver:
+A `SUPABASE_SECRET_KEY` continua somente no Vercel.
 
-```text
-awaiting_affiliate_link
-ready_to_publish
-sending
-sent
-send_error
-rejected
-```
-
-ele NÃO entra novamente.
-
-## Causa 2 — intervals após reconexão
-
-Antes uma reconexão Baileys podia iniciar novos timers sem encerrar
-os anteriores.
-
-Agora:
-
-```text
-connection close
-→ clearActiveTimers()
-→ reconecta
-→ cria apenas um conjunto novo
-```
-
-Também existe:
-
-```text
-discoveryInProgress
-```
-
-para impedir duas descobertas simultâneas.
-
-## Limpeza dos duplicados que já existem
-
-Foi criada a ação interna:
-
-```text
-queue-dedupe
-```
-
-O publisher executa automaticamente ao conectar.
-
-Ele:
-- agrupa por productId;
-- se já existe `sent`, mantém o enviado;
-- neutraliza cópias ainda ativas;
-- se nenhum foi enviado, mantém a entrada mais avançada;
-- marca as demais como `duplicate_skipped`.
-
-Histórico já enviado não é apagado.
-
-No terminal:
-
-```text
-🧹 Dedupe fila: 2 grupo(s), 2 entrada(s) neutralizada(s).
-```
-
-ou:
-
-```text
-🧹 Dedupe fila: nenhuma duplicata ativa.
-```
+Não precisa rodar SQL: `tt_app_state` já existe.
 
 ## Arquivos
+
+Adicione:
+
+```text
+api/app-state.js
+```
 
 Substitua:
 
 ```text
-api/discover-bestsellers.js
-lib/tt-queue-admin-actions.js
-lib/tt-pending-publication-store.js
 whatsapp/publish-queue.js
 ```
 
-O ZIP inclui também o `ml-affiliate-link.js` mais recente para manter o
-pacote consistente.
+Remova o endpoint temporário:
+
+```text
+api/supabase-status.js
+```
 
 ## Git
 
-Pare o bot com Ctrl+C e rode:
-
 ```powershell
-git add .
-git commit -m "Corrige duplicacao de ofertas"
+Remove-Item api\supabase-status.js -ErrorAction SilentlyContinue
+git add -A
+git commit -m "Persiste cursores no Supabase"
 git push
 ```
 
-Espere o Vercel ficar Ready.
+Espere o Vercel ficar `Ready`.
 
 Depois:
 
@@ -121,19 +54,45 @@ Depois:
 node whatsapp\publish-queue.js
 ```
 
-## Teste
-
-No início queremos ver:
+Na primeira inicialização deve aparecer:
 
 ```text
-🧹 Dedupe fila: ...
+🧭 Cursores Supabase: Eletrônicos 0 | Fitness 0 | Perfumes 0
 ```
 
-Depois envie no Aggin:
+Depois que os lotes avançarem, o estado é salvo uma vez ao terminar cada grupo.
+
+Para provar a persistência:
 
 ```text
-DESCOBRIR
+1. deixe os cursores avançarem
+2. Ctrl+C
+3. node whatsapp\publish-queue.js
 ```
 
-O mesmo productId não pode entrar novamente mesmo que o Mercado Livre
-retorne outro itemId/seller para ele.
+Na volta deve aparecer algo como:
+
+```text
+🧭 Cursores Supabase: Eletrônicos 11 | Fitness 10 | Perfumes 4
+```
+
+em vez de todos voltarem a zero.
+
+O registro no `tt_app_state` usa a chave:
+
+```text
+publisher_group_cursors
+```
+
+e um valor semelhante a:
+
+```json
+{
+  "eletronicos": 11,
+  "fitness": 10,
+  "perfumes": 4
+}
+```
+
+A gravação é feita apenas ao final de cada grupo: aproximadamente 3 gravações
+por ciclo completo, em vez de gravar a cada busca/produto.

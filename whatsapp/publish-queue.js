@@ -62,6 +62,19 @@ const ADMIN_KEY =
   )
     .trim();
 
+
+const APP_STATE_API =
+  (
+    process.env
+      .TT_APP_STATE_API ||
+    new URL(
+      "/api/app-state",
+      API_BASE
+    )
+      .toString()
+  )
+    .trim();
+
 const POLL_INTERVAL_MS =
   Math.max(
     Number(
@@ -859,6 +872,136 @@ async function apiPost(
   }
 
   return data;
+}
+
+function normalizeStoredCursor(value) {
+  const number =
+    Number(
+      value
+    );
+
+  if (
+    !Number.isFinite(
+      number
+    )
+  ) {
+    return 0;
+  }
+
+  return Math.max(
+    0,
+    Math.floor(
+      number
+    )
+  );
+}
+
+async function loadAutomaticGroupCursors() {
+  const response =
+    await fetch(
+      APP_STATE_API,
+      {
+        method:
+          "GET",
+
+        headers:
+          adminHeaders()
+      }
+    );
+
+  const data =
+    await response.json();
+
+  if (
+    !response.ok ||
+    data?.ok === false
+  ) {
+    throw new Error(
+      data?.error ||
+      `Estado dos cursores respondeu HTTP ${response.status}.`
+    );
+  }
+
+  const state =
+    data?.state ||
+    {};
+
+  automaticGroupCursors
+    .eletronicos =
+      normalizeStoredCursor(
+        state.eletronicos
+      );
+
+  automaticGroupCursors
+    .fitness =
+      normalizeStoredCursor(
+        state.fitness
+      );
+
+  automaticGroupCursors
+    .perfumes =
+      normalizeStoredCursor(
+        state.perfumes
+      );
+
+  return {
+    ...automaticGroupCursors
+  };
+}
+
+async function saveAutomaticGroupCursors() {
+  const state = {
+    eletronicos:
+      normalizeStoredCursor(
+        automaticGroupCursors
+          .eletronicos
+      ),
+
+    fitness:
+      normalizeStoredCursor(
+        automaticGroupCursors
+          .fitness
+      ),
+
+    perfumes:
+      normalizeStoredCursor(
+        automaticGroupCursors
+          .perfumes
+      )
+  };
+
+  const response =
+    await fetch(
+      APP_STATE_API,
+      {
+        method:
+          "POST",
+
+        headers:
+          adminHeaders(),
+
+        body:
+          JSON.stringify({
+            state
+          })
+      }
+    );
+
+  const data =
+    await response.json();
+
+  if (
+    !response.ok ||
+    data?.ok === false
+  ) {
+    throw new Error(
+      data?.error ||
+      `Persistência dos cursores respondeu HTTP ${response.status}.`
+    );
+  }
+
+  return data?.state ||
+    state;
 }
 
 async function setStatus(
@@ -2253,6 +2396,16 @@ async function processAutomaticBatchGroup(
     );
   }
 
+  try {
+    await saveAutomaticGroupCursors();
+  } catch (error) {
+    console.error(
+      `⚠️ Não consegui persistir cursor de ${meta.label}:`,
+      error?.message ||
+      error
+    );
+  }
+
   console.log(
     `${meta.emoji} Lote concluído: ${meta.label} → ${sentCount}/${AUTO_BATCH_SIZE} | buscas ${discoveryAttempts}/${AUTO_BATCH_DISCOVERY_ATTEMPTS}`
   );
@@ -2947,6 +3100,21 @@ async function start() {
           if (
             AUTO_BATCH_ENABLED
           ) {
+            try {
+              const restored =
+                await loadAutomaticGroupCursors();
+
+              console.log(
+                `🧭 Cursores Supabase: Eletrônicos ${restored.eletronicos} | Fitness ${restored.fitness} | Perfumes ${restored.perfumes}`
+              );
+            } catch (error) {
+              console.error(
+                "⚠️ Não consegui restaurar cursores do Supabase; usando memória local:",
+                error?.message ||
+                error
+              );
+            }
+
             runAutomaticBatchCycle(
               sock
             ).catch(

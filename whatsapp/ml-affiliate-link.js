@@ -789,7 +789,41 @@ export async function createAffiliateLink({
       attempts
     });
 
-  throw new Error(
-    `createLink não gerou short_url após ${attempts.length} tentativa(s). Diagnóstico seguro: ${diagnostic}`
-  );
+  const affiliateUrlNotAllowed =
+    attempts.some(
+      (attempt) =>
+        Array.isArray(
+          attempt?.entries
+        ) &&
+        attempt.entries.some(
+          (entry) =>
+            /url not allowed in affiliates program/i
+              .test(
+                String(
+                  entry?.error ||
+                  ""
+                )
+              )
+        )
+    );
+
+  const finalError =
+    new Error(
+      `createLink não gerou short_url após ${attempts.length} tentativa(s). Diagnóstico seguro: ${diagnostic}`
+    );
+
+  if (
+    affiliateUrlNotAllowed
+  ) {
+    finalError.code =
+      "AFFILIATE_URL_NOT_ALLOWED";
+
+    finalError.permanent =
+      true;
+
+    finalError.safeReason =
+      "URL not allowed in affiliates program";
+  }
+
+  throw finalError;
 }

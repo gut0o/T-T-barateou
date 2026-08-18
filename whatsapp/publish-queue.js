@@ -1576,7 +1576,19 @@ async function fillNextAffiliateLink(
       error
     );
 
+    if (
+      error?.code
+    ) {
+      console.log(
+        `🔎 Código do erro afiliado: ${error.code}`
+      );
+    }
+
     const affiliateProgramRejected =
+      error?.code ===
+        "AFFILIATE_URL_NOT_ALLOWED" ||
+      error?.permanent ===
+        true ||
       /url not allowed in affiliates program/i
         .test(
           String(

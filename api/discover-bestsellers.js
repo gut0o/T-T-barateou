@@ -262,7 +262,33 @@ async function predictCategory({
 
     domainName:
       first.domain_name ||
-      null
+      null,
+
+    attributes:
+      Array.isArray(
+        first.attributes
+      )
+        ? first.attributes
+            .map(
+              (attribute) => ({
+                id:
+                  attribute?.id ||
+                  null,
+
+                valueId:
+                  attribute?.value_id ||
+                  null,
+
+                valueName:
+                  attribute?.value_name ||
+                  null
+              })
+            )
+            .filter(
+              (attribute) =>
+                attribute.id
+            )
+        : []
   };
 }
 
@@ -568,6 +594,58 @@ export default async function handler(
           .categoryId;
     }
 
+    const usePredictedBrand =
+      queryFlag(
+        req.query
+          ?.usePredictedBrand
+      );
+
+    let predictedBrand =
+      null;
+
+    if (
+      usePredictedBrand
+    ) {
+      predictedBrand =
+        categoryPrediction
+          ?.attributes
+          ?.find(
+            (attribute) =>
+              String(
+                attribute?.id ||
+                ""
+              )
+                .trim()
+                .toUpperCase() ===
+                "BRAND" &&
+              attribute?.valueId
+          ) ||
+        null;
+
+      if (
+        !predictedBrand
+      ) {
+        return res
+          .status(200)
+          .json({
+            ok:
+              false,
+
+            error:
+              `O preditor não retornou BRAND para "${categoryQuery}".`,
+
+            errorCode:
+              "PREDICTED_BRAND_NOT_FOUND",
+
+            accessTokenExposed:
+              false,
+
+            refreshTokenExposed:
+              false
+          });
+      }
+    }
+
     const result =
       await discoverBestSellers({
         accessToken:
@@ -575,7 +653,17 @@ export default async function handler(
             .access_token,
 
         categoryId:
-          discoveryCategoryId
+          discoveryCategoryId,
+
+        attribute:
+          predictedBrand
+            ? "BRAND"
+            : null,
+
+        attributeValue:
+          predictedBrand
+            ?.valueId ||
+          null
       });
 
     if (
@@ -756,7 +844,21 @@ export default async function handler(
             null,
 
           prediction:
-            categoryPrediction
+            categoryPrediction,
+
+          brandFilter:
+            predictedBrand
+              ? {
+                  id:
+                    predictedBrand
+                      .valueId,
+
+                  name:
+                    predictedBrand
+                      .valueName ||
+                    null
+                }
+              : null
         },
 
         discoveryStrategy:

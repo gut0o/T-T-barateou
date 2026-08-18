@@ -132,9 +132,9 @@ const AUTO_BATCH_DISCOVERY_ATTEMPTS =
       Number(
         process.env
           .TT_AUTO_BATCH_DISCOVERY_ATTEMPTS ||
-        5
-      ) || 5,
-      10
+        8
+      ) || 8,
+      12
     ),
     1
   );
@@ -176,6 +176,17 @@ let discoveryCursor =
 
 let automaticBatchInProgress =
   false;
+
+const automaticGroupCursors = {
+  eletronicos:
+    0,
+
+  fitness:
+    0,
+
+  perfumes:
+    0
+};
 
 const AUTO_AFFILIATE_ENABLED =
   String(
@@ -2085,7 +2096,7 @@ async function processAutomaticBatchGroup(
   }
 
   console.log(
-    `${meta.emoji} Lote iniciado: ${meta.label} (máx. ${AUTO_BATCH_SIZE})`
+    `${meta.emoji} Lote iniciado: ${meta.label} (máx. ${AUTO_BATCH_SIZE}) | cursor inicial ${automaticGroupCursors[group] || 0}`
   );
 
   let sentCount =
@@ -2095,7 +2106,12 @@ async function processAutomaticBatchGroup(
     0;
 
   let targetedCursor =
-    0;
+    Number(
+      automaticGroupCursors[
+        group
+      ] ||
+      0
+    ) || 0;
 
   while (
     sentCount <
@@ -2196,6 +2212,11 @@ async function processAutomaticBatchGroup(
         targetedCursor +=
           1;
       }
+
+      automaticGroupCursors[
+        group
+      ] =
+        targetedCursor;
 
       // Depois da descoberta, volta ao topo para:
       // ready → affiliate → send.
@@ -2863,6 +2884,9 @@ async function start() {
             );
             console.log(
               `🔎 Pool: até ${AUTO_BATCH_DISCOVERY_ATTEMPTS} buscas por grupo/ciclo`
+            );
+            console.log(
+              "🔄 Pool rotativo: cada grupo continua do cursor anterior"
             );
             console.log(
               `⏸️ Pausa após ciclo: ${AUTO_BATCH_PAUSE_MS} ms`

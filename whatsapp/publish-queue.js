@@ -1576,6 +1576,63 @@ async function fillNextAffiliateLink(
       error
     );
 
+    const affiliateProgramRejected =
+      /url not allowed in affiliates program/i
+        .test(
+          String(
+            error?.message ||
+            ""
+          )
+        );
+
+    if (
+      affiliateProgramRejected &&
+      typeof entry !== "undefined" &&
+      entry?.itemId
+    ) {
+      try {
+        await setStatus(
+          entry.itemId,
+          "rejected",
+          {
+            errorMessage:
+              "Mercado Livre informou: URL not allowed in affiliates program."
+          }
+        );
+
+        rememberHandled(
+          recentAffiliateProducts,
+          entry,
+          24 * 60 * 60 * 1000
+        );
+
+        console.log(
+          `🚫 Rejeitada definitivamente para afiliados: ${entry.title || entry.itemId}`
+        );
+
+        await sock.sendMessage(
+          routing
+            .controlGroup
+            .jid,
+          {
+            text:
+              "🚫 *OFERTA REJEITADA PELO PROGRAMA DE AFILIADOS*\n\n" +
+              `${entry.title || entry.itemId}\n\n` +
+              "O Mercado Livre informou que essa URL não é permitida no programa. " +
+              "Ela foi marcada como *rejected* e não será tentada novamente."
+          }
+        );
+
+        return false;
+      } catch (rejectError) {
+        console.error(
+          "⚠️ Não consegui marcar a oferta como rejected:",
+          rejectError?.message ||
+          rejectError
+        );
+      }
+    }
+
     // Não repete imediatamente o mesmo erro a cada 30s.
     // Depois de 60s o item pode ser tentado novamente.
     if (
@@ -1597,7 +1654,7 @@ async function fillNextAffiliateLink(
         text:
           "❌ Não consegui gerar/validar o link afiliado para uma oferta.\n\n" +
           `${error?.message || "Erro desconhecido."}\n\n` +
-          "A oferta permaneceu aguardando link."
+          "A oferta permaneceu aguardando link porque o erro não foi classificado como rejeição definitiva."
       }
     );
 

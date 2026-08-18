@@ -61,10 +61,21 @@ const PERFUME_TERMS = [
   "eau de cologne",
   "deo parfum",
   "deo colonia",
+  "deo-colonia",
+  "deo cologne",
   "desodorante colonia",
+  "desodorante-colonia",
+  "colonia desodorante",
+  "agua de colonia",
   "fragrancia",
+  "fragrance",
   "colonia",
-  "body splash"
+  "body splash",
+  "body mist",
+  "splash corporal",
+  "mist corporal",
+  "spray corporal perfumado",
+  "perfume corporal"
 ];
 
 const PERFUME_EXCLUSIONS = [
@@ -196,16 +207,61 @@ function perfumeDestination(
       entry
     );
 
-  if (
-    !title ||
-    (
-      !includesAny(
-        title,
-        PERFUME_TERMS
-      ) &&
-      !includesPerfumeAbbreviation(
-        title
+  const categoryText =
+    normalize(
+      [
+        entry?.ttCategoryName,
+        entry?.resolvedCategoryName,
+        entry?.rootCategory,
+        Array.isArray(
+          entry?.categoryPath
+        )
+          ? entry.categoryPath
+              .map(
+                (part) =>
+                  typeof part === "string"
+                    ? part
+                    : (
+                        part?.name ||
+                        ""
+                      )
+              )
+              .join(" ")
+          : ""
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+
+  const titleLooksLikePerfume =
+    Boolean(
+      title &&
+      (
+        includesAny(
+          title,
+          PERFUME_TERMS
+        ) ||
+        includesPerfumeAbbreviation(
+          title
+        )
       )
+    );
+
+  const categoryLooksLikePerfume =
+    includesAny(
+      categoryText,
+      [
+        "perfume",
+        "perfumaria",
+        "fragrancia",
+        "colonia"
+      ]
+    );
+
+  if (
+    (
+      !titleLooksLikePerfume &&
+      !categoryLooksLikePerfume
     ) ||
     includesAny(
       title,

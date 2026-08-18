@@ -966,10 +966,44 @@ async function apiPost(
     !response.ok ||
     data?.ok === false
   ) {
-    throw new Error(
-      data?.error ||
-      `Backend respondeu HTTP ${response.status}.`
-    );
+    const backendError =
+      new Error(
+        data?.error ||
+        `Backend respondeu HTTP ${response.status}.`
+      );
+
+    // Preserva os detalhes estruturados devolvidos pelo backend.
+    // Isso é importante para diferenciar:
+    // - erro temporário;
+    // - link afiliado que resolveu para outro produto.
+    backendError.httpStatus =
+      response.status;
+
+    backendError.backendData =
+      data ||
+      null;
+
+    backendError.validation =
+      data?.validation ||
+      null;
+
+    if (
+      data
+        ?.validation
+        ?.reason ===
+        "resolved_to_different_offer"
+    ) {
+      backendError.code =
+        "AFFILIATE_LINK_MISMATCH";
+
+      backendError.permanent =
+        true;
+
+      backendError.safeReason =
+        "O link afiliado resolveu para outro produto.";
+    }
+
+    throw backendError;
   }
 
   return data;
@@ -1731,6 +1765,16 @@ async function fillNextAffiliateLink(
     ) {
       console.log(
         `🔎 Código do erro afiliado: ${error.code}`
+      );
+    }
+
+    if (
+      error
+        ?.validation
+        ?.reason
+    ) {
+      console.log(
+        `🔎 Validação do link: ${error.validation.reason}`
       );
     }
 

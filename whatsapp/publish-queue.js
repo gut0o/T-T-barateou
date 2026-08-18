@@ -2411,6 +2411,9 @@ async function processAutomaticBatchGroup(
       0
     ) || 0;
 
+  let stopAfterCurrentPoolEnd =
+    false;
+
   while (
     sentCount <
     AUTO_BATCH_SIZE
@@ -2472,6 +2475,7 @@ async function processAutomaticBatchGroup(
     //    frente de busca. Cada tentativa usa outra semente.
     if (
       !entry &&
+      !stopAfterCurrentPoolEnd &&
       discoveryAttempts <
         AUTO_BATCH_DISCOVERY_ATTEMPTS
     ) {
@@ -2509,6 +2513,9 @@ async function processAutomaticBatchGroup(
       discoveryAttempts +=
         1;
 
+      const previousCursor =
+        targetedCursor;
+
       if (
         typeof result
           ?.nextCursor ===
@@ -2521,10 +2528,25 @@ async function processAutomaticBatchGroup(
           1;
       }
 
+      const wrappedPool =
+        targetedCursor <=
+        previousCursor;
+
       automaticGroupCursors[
         group
       ] =
         targetedCursor;
+
+      if (
+        wrappedPool
+      ) {
+        stopAfterCurrentPoolEnd =
+          true;
+
+        console.log(
+          `${meta.emoji} Fim do pool alcançado. Não vou voltar ao começo neste mesmo ciclo.`
+        );
+      }
 
       // Depois da descoberta, volta ao topo para:
       // ready → affiliate → send.

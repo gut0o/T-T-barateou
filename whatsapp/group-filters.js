@@ -81,6 +81,70 @@ const PERFUME_EXCLUSIONS = [
   "mostruario perfume"
 ];
 
+const ELECTRONICS_TERMS = [
+  "celular",
+  "smartphone",
+  "iphone",
+  "galaxy",
+  "tablet",
+  "ipad",
+  "notebook",
+  "laptop",
+  "macbook",
+  "chromebook",
+  "computador",
+  "pc gamer",
+  "desktop",
+  "monitor",
+  "smart tv",
+  "televisao",
+  "televisor",
+  "fone de ouvido",
+  "headphone",
+  "headset",
+  "earbuds",
+  "tws",
+  "airpods",
+  "caixa de som",
+  "soundbar",
+  "speaker bluetooth",
+  "microfone",
+  "webcam",
+  "camera digital",
+  "camera fotografica",
+  "gopro",
+  "drone",
+  "playstation",
+  "ps4",
+  "ps5",
+  "xbox",
+  "nintendo switch",
+  "videogame",
+  "video game",
+  "console",
+  "controle gamer",
+  "joystick",
+  "placa de video",
+  "gpu",
+  "processador",
+  "memoria ram",
+  "ssd",
+  "hd externo",
+  "roteador",
+  "modem",
+  "wifi",
+  "wi-fi",
+  "teclado",
+  "mouse",
+  "smartwatch",
+  "smart watch",
+  "apple watch",
+  "impressora",
+  "projetor",
+  "echo dot",
+  "alexa"
+];
+
 const FITNESS_TERMS = [
   "fitness",
   "academia",
@@ -180,14 +244,52 @@ function electronicsDestination(
   entry,
   routing
 ) {
+  const title =
+    titleOf(
+      entry
+    );
+
   const categoryId =
     normalize(
       entry?.ttCategoryId
     );
 
+  const categoryName =
+    normalize(
+      entry?.ttCategoryName
+    );
+
+  const categoryMatch =
+    categoryId ===
+      "tecnologia_games" ||
+    includesAny(
+      categoryName,
+      [
+        "tecnologia",
+        "games",
+        "eletronicos",
+        "informatica",
+        "celulares"
+      ]
+    );
+
+  const titleMatch =
+    includesAny(
+      title,
+      ELECTRONICS_TERMS
+    );
+
+  // A rota interna do Mercado Livre nem sempre chega com
+  // ttCategoryId=tecnologia_games, mesmo quando a busca foi
+  // claramente Celulares, TVs, Notebooks ou Fones.
+  //
+  // Portanto aceitamos:
+  // 1) categoria T&T correta, OU
+  // 2) nome de categoria claramente eletrônico, OU
+  // 3) título com um termo forte de eletrônicos.
   if (
-    categoryId !==
-    "tecnologia_games"
+    !categoryMatch &&
+    !titleMatch
   ) {
     return null;
   }

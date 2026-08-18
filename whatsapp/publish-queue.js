@@ -190,6 +190,14 @@ let discoveryCursor =
 let automaticBatchInProgress =
   false;
 
+// Modo manual:
+// - pausa novos lotes automáticos
+// - mantém o bot conectado
+// - permite colar um link no grupo de controle
+// - usa a prévia + SIM/NÃO já existente
+let manualModeEnabled =
+  false;
+
 const automaticGroupCursors = {
   eletronicos:
     0,
@@ -529,6 +537,47 @@ function isDiscoverCommand(text) {
     value === "buscar ofertas" ||
     value === "procurar ofertas"
   );
+}
+
+function manualModeCommand(
+  text
+) {
+  const value =
+    normalizeAnswer(
+      text
+    );
+
+  if (
+    value === "manual" ||
+    value === "manual on" ||
+    value === "modo manual" ||
+    value === "modo manual on" ||
+    value === "pausar auto" ||
+    value === "pausa auto"
+  ) {
+    return "on";
+  }
+
+  if (
+    value === "manual off" ||
+    value === "modo manual off" ||
+    value === "auto" ||
+    value === "modo auto" ||
+    value === "retomar auto" ||
+    value === "continuar auto"
+  ) {
+    return "off";
+  }
+
+  if (
+    value === "manual status" ||
+    value === "modo" ||
+    value === "modo status"
+  ) {
+    return "status";
+  }
+
+  return null;
 }
 
 
@@ -1852,6 +1901,110 @@ async function triggerAutoDiscovery(
   }
 }
 
+async function sendManualModeStatus(
+  sock
+) {
+  await sock.sendMessage(
+    routing
+      .controlGroup
+      .jid,
+    {
+      text:
+        manualModeEnabled
+          ? (
+              "✋ *MODO MANUAL ATIVO*\n\n" +
+              "🤖 Ciclos automáticos pausados.\n" +
+              "🔗 Cole um link do Mercado Livre ou meli.la neste grupo.\n" +
+              "👀 O T&T prepara a oferta e mostra a prévia.\n" +
+              "✅ Responda *SIM* para enviar.\n" +
+              "🚫 Responda *NÃO* para cancelar.\n\n" +
+              "Para voltar à automação: *MANUAL OFF*"
+            )
+          : (
+              "🤖 *MODO AUTOMÁTICO ATIVO*\n\n" +
+              "Os ciclos automáticos estão liberados.\n" +
+              "Para pausar e trabalhar só com links escolhidos por você: *MANUAL ON*"
+            )
+    }
+  );
+}
+
+async function setManualMode(
+  sock,
+  enabled
+) {
+  const next =
+    enabled === true;
+
+  if (
+    manualModeEnabled ===
+    next
+  ) {
+    await sendManualModeStatus(
+      sock
+    );
+
+    return;
+  }
+
+  manualModeEnabled =
+    next;
+
+  if (
+    manualModeEnabled
+  ) {
+    console.log(
+      "✋ Modo manual ATIVO. Novos lotes automáticos pausados."
+    );
+
+    await sock.sendMessage(
+      routing
+        .controlGroup
+        .jid,
+      {
+        text:
+          "✋ *MODO MANUAL ATIVADO*\n\n" +
+          "O T&T vai pausar os ciclos automáticos.\n\n" +
+          "Agora cole aqui um link:\n" +
+          "• mercadolivre.com.br/...\n" +
+          "• meli.la/...\n\n" +
+          "Quando a prévia aparecer:\n" +
+          "✅ *SIM* → enviar\n" +
+          "🚫 *NÃO* → cancelar\n\n" +
+          "Para voltar: *MANUAL OFF*"
+      }
+    );
+
+    return;
+  }
+
+  console.log(
+    "🤖 Modo automático ATIVO."
+  );
+
+  await sock.sendMessage(
+    routing
+      .controlGroup
+      .jid,
+    {
+      text:
+        "🤖 *MODO AUTOMÁTICO REATIVADO*\n\n" +
+        "Os ciclos automáticos foram liberados."
+    }
+  );
+
+  if (
+    AUTO_BATCH_ENABLED &&
+    !automaticBatchInProgress
+  ) {
+    runAutomaticBatchCycle(
+      sock
+    ).catch(
+      console.error
+    );
+  }
+}
+
 async function handleAffiliateLinksFromControl(
   sock,
   links
@@ -1867,7 +2020,9 @@ async function handleAffiliateLinksFromControl(
         .jid,
       {
         text:
-          `🔗 Processando ${links.length} link(s) afiliado(s)...`
+          manualModeEnabled
+            ? `✋🔗 Processando ${links.length} link(s) no modo manual...`
+            : `🔗 Processando ${links.length} link(s) afiliado(s)...`
       }
     );
 
@@ -2260,6 +2415,16 @@ async function processAutomaticBatchGroup(
     sentCount <
     AUTO_BATCH_SIZE
   ) {
+    if (
+      manualModeEnabled
+    ) {
+      console.log(
+        `${meta.emoji} Lote ${meta.label} interrompido: modo manual ativo.`
+      );
+
+      break;
+    }
+
     // 1. Tenta aproveitar algo que já está pronto.
     let entry =
       await getReadyItem(
@@ -2423,6 +2588,16 @@ async function runAutomaticBatchCycle(
     return;
   }
 
+  if (
+    manualModeEnabled
+  ) {
+    console.log(
+      "✋ Ciclo automático não iniciado: modo manual ativo."
+    );
+
+    return;
+  }
+
   automaticBatchInProgress =
     true;
 
@@ -2450,6 +2625,16 @@ async function runAutomaticBatchCycle(
       const group of
       AUTO_BATCH_GROUPS
     ) {
+      if (
+        manualModeEnabled
+      ) {
+        console.log(
+          "✋ Ciclo automático pausado antes do próximo grupo."
+        );
+
+        break;
+      }
+
       counts[
         group
       ] =
@@ -2506,7 +2691,8 @@ async function runAutomaticBatchCycle(
       false;
 
     if (
-      AUTO_BATCH_ENABLED
+      AUTO_BATCH_ENABLED &&
+      !manualModeEnabled
     ) {
       scheduleTimeout(
         () => {
@@ -3067,7 +3253,10 @@ async function start() {
             );
           }
           console.log(
-            `💬 Comandos em ${routing.controlGroup.name}: STATUS | DESCOBRIR | DESCOBRIR ELETRONICOS | DESCOBRIR FITNESS | DESCOBRIR PERFUMES | cole um meli.la`
+            `💬 Comandos em ${routing.controlGroup.name}: STATUS | MANUAL ON | MANUAL OFF | DESCOBRIR | DESCOBRIR ELETRONICOS | DESCOBRIR FITNESS | DESCOBRIR PERFUMES | cole um link ML/meli.la`
+          );
+          console.log(
+            `✋ Modo manual: ${manualModeEnabled ? "ATIVO" : "DESLIGADO"}`
           );
           console.log(
             "🛑 Ctrl + C para parar.\n"
@@ -3295,6 +3484,46 @@ async function start() {
             continue;
           }
 
+          const manualCommand =
+            manualModeCommand(
+              text
+            );
+
+          if (
+            manualCommand ===
+            "on"
+          ) {
+            await setManualMode(
+              sock,
+              true
+            );
+
+            continue;
+          }
+
+          if (
+            manualCommand ===
+            "off"
+          ) {
+            await setManualMode(
+              sock,
+              false
+            );
+
+            continue;
+          }
+
+          if (
+            manualCommand ===
+            "status"
+          ) {
+            await sendManualModeStatus(
+              sock
+            );
+
+            continue;
+          }
+
           const affiliateLinks =
             extractAffiliateLinks(
               text
@@ -3329,6 +3558,23 @@ async function start() {
             );
 
           if (
+            discoverGroup &&
+            manualModeEnabled
+          ) {
+            await sock.sendMessage(
+              routing
+                .controlGroup
+                .jid,
+              {
+                text:
+                  "✋ Modo manual ativo. Cole o link escolhido ou envie *MANUAL OFF* para voltar à descoberta."
+              }
+            );
+
+            continue;
+          }
+
+          if (
             discoverGroup
           ) {
             await triggerAutoDiscovery(
@@ -3336,6 +3582,25 @@ async function start() {
               {
                 group:
                   discoverGroup
+              }
+            );
+
+            continue;
+          }
+
+          if (
+            isDiscoverCommand(
+              text
+            ) &&
+            manualModeEnabled
+          ) {
+            await sock.sendMessage(
+              routing
+                .controlGroup
+                .jid,
+              {
+                text:
+                  "✋ Modo manual ativo. Cole o link escolhido ou envie *MANUAL OFF* para voltar à descoberta."
               }
             );
 

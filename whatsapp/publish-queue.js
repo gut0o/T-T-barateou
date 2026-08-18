@@ -1465,8 +1465,14 @@ async function fillNextAffiliateLink(
   affiliateFillInProgress =
     true;
 
+  // Precisa existir fora do try para que o catch consiga
+  // marcar a mesma oferta como rejected quando o Mercado Livre
+  // devolver AFFILIATE_URL_NOT_ALLOWED.
+  let entry =
+    null;
+
   try {
-    const entry =
+    entry =
       await getAwaitingAffiliateItem(
         group
       );
@@ -1599,7 +1605,6 @@ async function fillNextAffiliateLink(
 
     if (
       affiliateProgramRejected &&
-      typeof entry !== "undefined" &&
       entry?.itemId
     ) {
       try {
@@ -1648,7 +1653,6 @@ async function fillNextAffiliateLink(
     // Não repete imediatamente o mesmo erro a cada 30s.
     // Depois de 60s o item pode ser tentado novamente.
     if (
-      typeof entry !== "undefined" &&
       entry
     ) {
       rememberHandled(

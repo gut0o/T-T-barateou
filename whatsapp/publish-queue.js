@@ -139,6 +139,48 @@ const AUTO_BATCH_PAUSE_MS =
     60000
   );
 
+// Janela do ENVIO AUTOMÁTICO.
+// O processo e o WhatsApp permanecem conectados 24h.
+const AUTO_SEND_START_HOUR =
+  Math.min(
+    Math.max(
+      Number.parseInt(
+        process.env
+          .TT_SEND_START_HOUR ||
+        "9",
+        10
+      ) || 0,
+      0
+    ),
+    23
+  );
+
+const AUTO_SEND_END_HOUR =
+  Math.min(
+    Math.max(
+      Number.parseInt(
+        process.env
+          .TT_SEND_END_HOUR ||
+        "22",
+        10
+      ) || 0,
+      0
+    ),
+    24
+  );
+
+const AUTO_SEND_TIMEZONE =
+  String(
+    process.env
+      .TT_SEND_TIMEZONE ||
+    "America/Sao_Paulo"
+  )
+    .trim() ||
+  "America/Sao_Paulo";
+
+const AUTO_SEND_WINDOW_CHECK_MS =
+  60000;
+
 const AUTO_BATCH_DISCOVERY_ATTEMPTS =
   Math.max(
     Math.min(
@@ -249,6 +291,204 @@ function connectionClosedError() {
 // - usa a prévia + SIM/NÃO já existente
 let manualModeEnabled =
   false;
+
+let automaticWindowPauseLogged =
+  false;
+
+function automaticClockParts(
+  date = new Date()
+) {
+  const formatter =
+    new Intl.DateTimeFormat(
+      "en-CA",
+      {
+        timeZone:
+          AUTO_SEND_TIMEZONE,
+
+        hour:
+          "2-digit",
+
+        minute:
+          "2-digit",
+
+        second:
+          "2-digit",
+
+        hourCycle:
+          "h23"
+      }
+    );
+
+  const values =
+    Object.fromEntries(
+      formatter
+        .formatToParts(
+          date
+        )
+        .filter(
+          (part) =>
+            part.type !==
+            "literal"
+        )
+        .map(
+          (part) => [
+            part.type,
+            part.value
+          ]
+        )
+    );
+
+  return {
+    hour:
+      Number(
+        values.hour ||
+        0
+      ),
+
+    minute:
+      Number(
+        values.minute ||
+        0
+      ),
+
+    second:
+      Number(
+        values.second ||
+        0
+      )
+  };
+}
+
+function isAutomaticSendWindowOpen(
+  date = new Date()
+) {
+  const {
+    hour
+  } =
+    automaticClockParts(
+      date
+    );
+
+  // Mesma hora = janela 24h.
+  if (
+    AUTO_SEND_START_HOUR ===
+    AUTO_SEND_END_HOUR
+  ) {
+    return true;
+  }
+
+  // Ex.: 09 -> 22.
+  if (
+    AUTO_SEND_START_HOUR <
+    AUTO_SEND_END_HOUR
+  ) {
+    return (
+      hour >=
+        AUTO_SEND_START_HOUR &&
+      hour <
+        AUTO_SEND_END_HOUR
+    );
+  }
+
+  // Também suporta uma janela atravessando meia-noite.
+  return (
+    hour >=
+      AUTO_SEND_START_HOUR ||
+    hour <
+      AUTO_SEND_END_HOUR
+  );
+}
+
+function automaticWindowLabel() {
+  const hourLabel =
+    (hour) =>
+      String(
+        hour
+      )
+        .padStart(
+          2,
+          "0"
+        ) +
+      ":00";
+
+  return (
+    `${hourLabel(AUTO_SEND_START_HOUR)}–` +
+    `${hourLabel(AUTO_SEND_END_HOUR)} ` +
+    `(${AUTO_SEND_TIMEZONE})`
+  );
+}
+
+function automaticCurrentClockLabel() {
+  const {
+    hour,
+    minute,
+    second
+  } =
+    automaticClockParts();
+
+  return [
+    hour,
+    minute,
+    second
+  ]
+    .map(
+      (value) =>
+        String(
+          value
+        )
+          .padStart(
+            2,
+            "0"
+          )
+    )
+    .join(":");
+}
+
+function automaticWindowClosedError() {
+  const error =
+    new Error(
+      `Fora da janela automática ${automaticWindowLabel()}.`
+    );
+
+  error.code =
+    "AUTOMATIC_SEND_WINDOW_CLOSED";
+
+  return error;
+}
+
+function isAutomaticWindowClosedError(
+  error
+) {
+  return (
+    error?.code ===
+    "AUTOMATIC_SEND_WINDOW_CLOSED"
+  );
+}
+
+function scheduleAutomaticWindowCheck(
+  sock
+) {
+  if (
+    !AUTO_BATCH_ENABLED ||
+    manualModeEnabled ||
+    !isSocketActive(
+      sock
+    )
+  ) {
+    return;
+  }
+
+  scheduleTimeout(
+    () => {
+      runAutomaticBatchCycle(
+        sock
+      ).catch(
+        console.error
+      );
+    },
+    AUTO_SEND_WINDOW_CHECK_MS
+  );
+}
 
 const automaticGroupCursors = {
   eletronicos:
@@ -1916,8 +2156,15 @@ async function sendQueueSummary(
       summary.counts ||
       {};
 
+    const windowOpen =
+      isAutomaticSendWindowOpen();
+
     const lines = [
       "📊 *T&T - STATUS DA FILA*",
+      "",
+      `🕘 Automático: ${automaticWindowLabel()}`,
+      `${windowOpen ? "🟢" : "🌙"} Janela agora: ${windowOpen ? "LIBERADA" : "PAUSADA"} (${automaticCurrentClockLabel()})`,
+      `✋ Modo manual: ${manualModeEnabled ? "ATIVO" : "DESLIGADO"}`,
       "",
       `⏳ Aguardando link: ${counts.awaiting_affiliate_link || 0}`,
       `✅ Prontas: ${counts.ready_to_publish || 0}`,
@@ -2431,6 +2678,12 @@ async function sendEntryAutomatically(
       throw connectionClosedError();
     }
 
+    if (
+      !isAutomaticSendWindowOpen()
+    ) {
+      throw automaticWindowClosedError();
+    }
+
     await setStatus(
       entry.itemId,
       "sending",
@@ -2449,6 +2702,12 @@ async function sendEntryAutomatically(
           .whatsappPayload
           ?.image
       );
+
+    if (
+      !isAutomaticSendWindowOpen()
+    ) {
+      throw automaticWindowClosedError();
+    }
 
     const sent =
       await sock.sendMessage(
@@ -2512,6 +2771,40 @@ async function sendEntryAutomatically(
 
     return true;
   } catch (error) {
+    if (
+      isAutomaticWindowClosedError(
+        error
+      )
+    ) {
+      try {
+        await setStatus(
+          entry.itemId,
+          "retry",
+          {
+            groupJid:
+              destination.jid,
+
+            groupName:
+              destination.name
+          }
+        );
+
+        console.log(
+          `🌙 Horário automático encerrado; oferta devolvida para ready_to_publish: ${entry.title}`
+        );
+      } catch (
+        retryError
+      ) {
+        console.error(
+          "⚠️ Não consegui devolver a oferta após o encerramento do horário:",
+          retryError?.message ||
+          retryError
+        );
+      }
+
+      throw automaticWindowClosedError();
+    }
+
     if (
       isConnectionClosedError(
         error
@@ -2771,6 +3064,12 @@ async function processAutomaticBatchGroup(
     }
 
     if (
+      !isAutomaticSendWindowOpen()
+    ) {
+      throw automaticWindowClosedError();
+    }
+
+    if (
       manualModeEnabled
     ) {
       console.log(
@@ -2972,6 +3271,41 @@ async function runAutomaticBatchCycle(
     return;
   }
 
+  if (
+    !isAutomaticSendWindowOpen()
+  ) {
+    if (
+      !automaticWindowPauseLogged
+    ) {
+      console.log(
+        `🌙 Automação pausada fora do horário ${automaticWindowLabel()}. Agora: ${automaticCurrentClockLabel()}.`
+      );
+      console.log(
+        "✅ WhatsApp permanece conectado. O modo manual continua liberado."
+      );
+
+      automaticWindowPauseLogged =
+        true;
+    }
+
+    scheduleAutomaticWindowCheck(
+      sock
+    );
+
+    return;
+  }
+
+  if (
+    automaticWindowPauseLogged
+  ) {
+    console.log(
+      `☀️ Janela automática liberada (${automaticWindowLabel()}). Retomando ciclos.`
+    );
+
+    automaticWindowPauseLogged =
+      false;
+  }
+
   automaticBatchInProgress =
     true;
 
@@ -3007,6 +3341,12 @@ async function runAutomaticBatchCycle(
         );
 
         break;
+      }
+
+      if (
+        !isAutomaticSendWindowOpen()
+      ) {
+        throw automaticWindowClosedError();
       }
 
       counts[
@@ -3056,6 +3396,17 @@ async function runAutomaticBatchCycle(
     );
   } catch (error) {
     if (
+      isAutomaticWindowClosedError(
+        error
+      )
+    ) {
+      console.log(
+        `🌙 Ciclo automático interrompido: chegou ao fim da janela ${automaticWindowLabel()}.`
+      );
+
+      automaticWindowPauseLogged =
+        true;
+    } else if (
       isConnectionClosedError(
         error
       )
@@ -3081,6 +3432,11 @@ async function runAutomaticBatchCycle(
         sock
       )
     ) {
+      const nextDelay =
+        isAutomaticSendWindowOpen()
+          ? AUTO_BATCH_PAUSE_MS
+          : AUTO_SEND_WINDOW_CHECK_MS;
+
       scheduleTimeout(
         () => {
           runAutomaticBatchCycle(
@@ -3089,7 +3445,7 @@ async function runAutomaticBatchCycle(
             console.error
           );
         },
-        AUTO_BATCH_PAUSE_MS
+        nextDelay
       );
     }
   }
@@ -3537,6 +3893,14 @@ async function start() {
   routing =
     await loadRouting();
 
+  try {
+    automaticClockParts();
+  } catch {
+    throw new Error(
+      `TT_SEND_TIMEZONE inválido: ${AUTO_SEND_TIMEZONE}`
+    );
+  }
+
   if (!ADMIN_KEY) {
     throw new Error(
       "Defina TT_QUEUE_ADMIN_KEY no PowerShell antes de iniciar."
@@ -3653,6 +4017,15 @@ async function start() {
             );
             console.log(
               `⏸️ Pausa após ciclo: ${AUTO_BATCH_PAUSE_MS} ms`
+            );
+            console.log(
+              `🕘 Janela automática: ${automaticWindowLabel()}`
+            );
+            console.log(
+              `${isAutomaticSendWindowOpen() ? "🟢" : "🌙"} Automação agora: ${isAutomaticSendWindowOpen() ? "LIBERADA" : "PAUSADA"} (${automaticCurrentClockLabel()})`
+            );
+            console.log(
+              "✋ Modo manual: liberado em qualquer horário"
             );
           }
           console.log(

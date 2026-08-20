@@ -213,10 +213,14 @@ const AUTO_BATCH_MIN_SEND =
 // Quantidade atual de frentes configuradas em tt-discovery-seeds.js.
 // Serve como limite de segurança para permitir uma volta completa no pool
 // quando o mínimo ainda não foi atingido.
-const AUTO_BATCH_GROUP_POOL_SIZES = {
-  eletronicos: 24,
-  fitness: 24,
-  perfumes: 42
+const AUTO_BATCH_GROUP_POOL_FALLBACKS = {
+  eletronicos: 58,
+  fitness: 61,
+  perfumes: 68
+};
+
+const automaticGroupPoolSizes = {
+  ...AUTO_BATCH_GROUP_POOL_FALLBACKS
 };
 
 const AUTO_BATCH_GROUPS = [
@@ -3153,10 +3157,10 @@ async function processAutomaticBatchGroup(
     return 0;
   }
 
-  const poolSize =
+  let poolSize =
     Math.max(
       Number(
-        AUTO_BATCH_GROUP_POOL_SIZES[
+        automaticGroupPoolSizes[
           group
         ] ||
         AUTO_BATCH_DISCOVERY_ATTEMPTS
@@ -3281,6 +3285,31 @@ async function processAutomaticBatchGroup(
           meta,
           result
         );
+
+        if (
+          Number.isFinite(
+            Number(
+              result?.poolSize
+            )
+          ) &&
+          Number(
+            result.poolSize
+          ) >
+            0
+        ) {
+          poolSize =
+            Math.max(
+              Number(
+                result.poolSize
+              ),
+              AUTO_BATCH_DISCOVERY_ATTEMPTS
+            );
+
+          automaticGroupPoolSizes[
+            group
+          ] =
+            poolSize;
+        }
       } catch (error) {
         console.error(
           `⚠️ Descoberta ${meta.label}:`,
@@ -4163,6 +4192,9 @@ async function start() {
             );
             console.log(
               `🔎 Busca normal: até ${AUTO_BATCH_DISCOVERY_ATTEMPTS} frentes; abaixo do mínimo, percorre o pool inteiro`
+            );
+            console.log(
+              `🧭 Pools ampliados: Eletrônicos ${automaticGroupPoolSizes.eletronicos} | Fitness ${automaticGroupPoolSizes.fitness} | Perfumes ${automaticGroupPoolSizes.perfumes}`
             );
             console.log(
               "🔄 Pool rotativo: cada grupo continua do cursor anterior"

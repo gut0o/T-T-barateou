@@ -210,18 +210,16 @@ const AUTO_BATCH_MIN_SEND =
     1
   );
 
-// Quantidade atual de frentes configuradas em tt-discovery-seeds.js.
-// Serve como limite de segurança para permitir uma volta completa no pool
-// quando o mínimo ainda não foi atingido.
-const AUTO_BATCH_GROUP_POOL_FALLBACKS = {
-  eletronicos: 58,
-  fitness: 61,
-  perfumes: 68
-};
+// Descoberta contínua: cada chamada percorre uma página persistente de uma
+// consulta por texto. Não existe mais um pool finito a ser esgotado.
+const CONTINUOUS_DISCOVERY_NORMAL_PAGES =
+  Math.max(1, Number(process.env.TT_CONTINUOUS_NORMAL_PAGES || 8) || 8);
 
-const automaticGroupPoolSizes = {
-  ...AUTO_BATCH_GROUP_POOL_FALLBACKS
-};
+const CONTINUOUS_DISCOVERY_MAX_PAGES =
+  Math.max(
+    CONTINUOUS_DISCOVERY_NORMAL_PAGES,
+    Number(process.env.TT_CONTINUOUS_MAX_PAGES || 24) || 24
+  );
 
 const AUTO_BATCH_GROUPS = [
   "eletronicos",
@@ -1607,17 +1605,13 @@ async function runAutoDiscovery({
 
   const result =
     await apiPost(
-      "auto-discover",
+      targeted
+        ? "continuous-discover"
+        : "auto-discover",
       {
         cursor:
           targeted
-            ? (
-                Number.isFinite(
-                  Number(cursor)
-                )
-                  ? Number(cursor)
-                  : 0
-              )
+            ? null
             : discoveryCursor,
 
         limit:
@@ -3148,275 +3142,90 @@ async function processAutomaticBatchGroup(
   sock,
   group
 ) {
-  const meta =
-    AUTO_BATCH_LABELS[
-      group
-    ];
-
-  if (!meta) {
-    return 0;
-  }
-
-  let poolSize =
-    Math.max(
-      Number(
-        automaticGroupPoolSizes[
-          group
-        ] ||
-        AUTO_BATCH_DISCOVERY_ATTEMPTS
-      ) || AUTO_BATCH_DISCOVERY_ATTEMPTS,
-      AUTO_BATCH_DISCOVERY_ATTEMPTS
-    );
+  const meta = AUTO_BATCH_LABELS[group];
+  if (!meta) return 0;
 
   console.log(
-    `${meta.emoji} Lote iniciado: ${meta.label} (meta ${AUTO_BATCH_MIN_SEND}–${AUTO_BATCH_SIZE}) | cursor inicial ${automaticGroupCursors[group] || 0}`
+    `${meta.emoji} Lote iniciado: ${meta.label} (meta ${AUTO_BATCH_MIN_SEND}–${AUTO_BATCH_SIZE}) | descoberta contínua`
   );
 
-  let sentCount =
-    0;
+  let sentCount = 0;
+  let discoveryAttempts = 0;
+  let minimumExtensionLogged = false;
 
-  let discoveryAttempts =
-    0;
+  while (sentCount < AUTO_BATCH_SIZE) {
+    if (!isSocketActive(sock)) throw connectionClosedError();
+    if (!isAutomaticSendWindowOpen()) throw automaticWindowClosedError();
 
-  let targetedCursor =
-    Number(
-      automaticGroupCursors[
-        group
-      ] ||
-      0
-    ) || 0;
-
-  let wrappedPool =
-    false;
-
-  let minimumExtensionLogged =
-    false;
-
-  while (
-    sentCount <
-    AUTO_BATCH_SIZE
-  ) {
-    if (
-      !isSocketActive(
-        sock
-      )
-    ) {
-      throw connectionClosedError();
-    }
-
-    if (
-      !isAutomaticSendWindowOpen()
-    ) {
-      throw automaticWindowClosedError();
-    }
-
-    if (
-      manualModeEnabled
-    ) {
-      console.log(
-        `${meta.emoji} Lote ${meta.label} interrompido: modo manual ativo.`
-      );
-
+    if (manualModeEnabled) {
+      console.log(`${meta.emoji} Lote ${meta.label} interrompido: modo manual ativo.`);
       break;
     }
 
-    // Se ainda estamos abaixo do mínimo, podemos percorrer o pool inteiro.
-    // Depois de atingir o mínimo, voltamos ao limite normal de 8 buscas
-    // para tentar completar a terceira oferta sem alongar demais o ciclo.
     const discoveryLimit =
-      sentCount <
-        AUTO_BATCH_MIN_SEND
-        ? poolSize
-        : AUTO_BATCH_DISCOVERY_ATTEMPTS;
+      sentCount < AUTO_BATCH_MIN_SEND
+        ? CONTINUOUS_DISCOVERY_MAX_PAGES
+        : CONTINUOUS_DISCOVERY_NORMAL_PAGES;
 
     if (
-      sentCount <
-        AUTO_BATCH_MIN_SEND &&
-      discoveryAttempts >=
-        AUTO_BATCH_DISCOVERY_ATTEMPTS &&
+      sentCount < AUTO_BATCH_MIN_SEND &&
+      discoveryAttempts >= CONTINUOUS_DISCOVERY_NORMAL_PAGES &&
       !minimumExtensionLogged
     ) {
       console.log(
-        `${meta.emoji} Mínimo ${AUTO_BATCH_MIN_SEND} ainda não atingido. Vou continuar procurando no restante do pool (até ${poolSize} frentes).`
+        `${meta.emoji} Mínimo ${AUTO_BATCH_MIN_SEND} ainda não atingido. ` +
+        `Vou continuar na paginação contínua (até ${CONTINUOUS_DISCOVERY_MAX_PAGES} páginas neste ciclo).`
       );
-
-      minimumExtensionLogged =
-        true;
+      minimumExtensionLogged = true;
     }
 
-    // 1. Aproveita ready e tenta preparar vários awaiting.
-    //    Se um link for rejected, tenta o próximo em vez de abandonar.
-    let entry =
-      await getOrPrepareReadyBatchItem(
-        sock,
-        group,
-        {
-          affiliateAttempts:
-            6
-        }
-      );
+    let entry = await getOrPrepareReadyBatchItem(sock, group, {
+      affiliateAttempts: 8
+    });
 
-    // 2. Se ainda não temos oferta pronta, descobre uma nova frente.
-    if (
-      !entry &&
-      discoveryAttempts <
-        discoveryLimit
-    ) {
-      const attempt =
-        discoveryAttempts +
-        1;
-
+    if (!entry && discoveryAttempts < discoveryLimit) {
+      const attempt = discoveryAttempts + 1;
       console.log(
-        `${meta.emoji} Busca ${attempt}/${discoveryLimit}: ${meta.label} (cursor ${targetedCursor})`
+        `${meta.emoji} Busca contínua ${attempt}/${discoveryLimit}: ${meta.label}`
       );
 
-      let result =
-        null;
-
+      let result = null;
       try {
-        result =
-          await runAutoDiscovery({
-            group,
-            cursor:
-              targetedCursor
-          });
+        result = await runAutoDiscovery({ group });
+        logDiscoveryDiagnostic(meta, result);
 
-        logDiscoveryDiagnostic(
-          meta,
-          result
-        );
-
-        if (
-          Number.isFinite(
-            Number(
-              result?.poolSize
-            )
-          ) &&
-          Number(
-            result.poolSize
-          ) >
-            0
-        ) {
-          poolSize =
-            Math.max(
-              Number(
-                result.poolSize
-              ),
-              AUTO_BATCH_DISCOVERY_ATTEMPTS
-            );
-
-          automaticGroupPoolSizes[
-            group
-          ] =
-            poolSize;
+        if (result?.stream) {
+          console.log(
+            `${meta.emoji}      stream: ${result.stream.queryLabel} | ` +
+            `offset ${result.stream.offset} → ${result.stream.nextOffset}` +
+            `${result.stream.exhausted ? " | consulta reiniciada" : ""}`
+          );
         }
       } catch (error) {
-        console.error(
-          `⚠️ Descoberta ${meta.label}:`,
-          error?.message ||
-          error
-        );
+        console.error(`⚠️ Descoberta ${meta.label}:`, error?.message || error);
       }
 
-      discoveryAttempts +=
-        1;
-
-      const previousCursor =
-        targetedCursor;
-
-      if (
-        typeof result
-          ?.nextCursor ===
-          "number"
-      ) {
-        targetedCursor =
-          result.nextCursor;
-      } else {
-        targetedCursor +=
-          1;
-      }
-
-      const justWrapped =
-        targetedCursor <=
-        previousCursor;
-
-      if (
-        justWrapped
-      ) {
-        wrappedPool =
-          true;
-
-        if (
-          sentCount <
-            AUTO_BATCH_MIN_SEND
-        ) {
-          console.log(
-            `${meta.emoji} Fim do pool alcançado, mas o mínimo ${AUTO_BATCH_MIN_SEND} ainda não foi atingido. Continuando do início até completar uma volta de busca.`
-          );
-        } else {
-          console.log(
-            `${meta.emoji} Fim do pool alcançado com o mínimo já atendido.`
-          );
-        }
-      }
-
-      automaticGroupCursors[
-        group
-      ] =
-        targetedCursor;
-
-      // Importante: volta ao topo para consumir as ofertas recém-enfileiradas
-      // ANTES de decidir que o pool acabou.
+      discoveryAttempts += 1;
+      // Volta ao topo para consumir tudo que acabou de entrar na fila.
       continue;
     }
 
-    // 3. Sem ready e sem novas buscas possíveis.
-    if (!entry) {
-      break;
-    }
+    if (!entry) break;
 
-    const sent =
-      await sendEntryAutomatically(
-        sock,
-        entry,
-        group
-      );
-
+    const sent = await sendEntryAutomatically(sock, entry, group);
     if (!sent) {
-      rememberHandled(
-        recentSentProducts,
-        entry,
-        60000
-      );
-
-      // Não quebra o lote. Pode haver outra oferta pronta/awaiting.
+      rememberHandled(recentSentProducts, entry, 60000);
       continue;
     }
 
-    sentCount +=
-      1;
-
-    await sleep(
-      2500
-    );
+    sentCount += 1;
+    await sleep(2500);
   }
 
-  try {
-    await saveAutomaticGroupCursors();
-  } catch (error) {
-    console.error(
-      `⚠️ Não consegui persistir cursor de ${meta.label}:`,
-      error?.message ||
-      error
-    );
-  }
-
-  if (
-    sentCount <
-      AUTO_BATCH_MIN_SEND
-  ) {
+  if (sentCount < AUTO_BATCH_MIN_SEND) {
     console.log(
-      `${meta.emoji} ⚠️ Mínimo não atingido: ${meta.label} enviou ${sentCount}/${AUTO_BATCH_MIN_SEND}. O pool consultado não tinha ofertas novas/válidas suficientes sem repetir produtos.`
+      `${meta.emoji} ⚠️ Mínimo não atingido: ${meta.label} enviou ${sentCount}/${AUTO_BATCH_MIN_SEND}. ` +
+      `Foram consultadas ${discoveryAttempts} páginas contínuas sem repetir produto antigo.`
     );
   } else {
     console.log(
@@ -3425,7 +3234,8 @@ async function processAutomaticBatchGroup(
   }
 
   console.log(
-    `${meta.emoji} Lote concluído: ${meta.label} → ${sentCount}/${AUTO_BATCH_SIZE} | buscas ${discoveryAttempts}/${sentCount < AUTO_BATCH_MIN_SEND ? poolSize : Math.max(AUTO_BATCH_DISCOVERY_ATTEMPTS, discoveryAttempts)}${wrappedPool ? " | pool contornado" : ""}`
+    `${meta.emoji} Lote concluído: ${meta.label} → ${sentCount}/${AUTO_BATCH_SIZE} | ` +
+    `páginas contínuas ${discoveryAttempts}`
   );
 
   return sentCount;
@@ -4191,13 +4001,13 @@ async function start() {
               `📦 Lote: mínimo ${AUTO_BATCH_MIN_SEND}, alvo até ${AUTO_BATCH_SIZE} por grupo`
             );
             console.log(
-              `🔎 Busca normal: até ${AUTO_BATCH_DISCOVERY_ATTEMPTS} frentes; abaixo do mínimo, percorre o pool inteiro`
+              `🔎 Descoberta contínua: ${CONTINUOUS_DISCOVERY_NORMAL_PAGES} páginas normais; até ${CONTINUOUS_DISCOVERY_MAX_PAGES} abaixo do mínimo`
             );
             console.log(
-              `🧭 Pools ampliados: Eletrônicos ${automaticGroupPoolSizes.eletronicos} | Fitness ${automaticGroupPoolSizes.fitness} | Perfumes ${automaticGroupPoolSizes.perfumes}`
+              "♾️ products/search paginado + cursor por consulta salvo no Supabase"
             );
             console.log(
-              "🔄 Pool rotativo: cada grupo continua do cursor anterior"
+              "🔁 Reuso: após 30 dias somente se preço/desconto/oferta mudar"
             );
             console.log(
               `⏸️ Pausa após ciclo: ${AUTO_BATCH_PAUSE_MS} ms`
@@ -4294,7 +4104,7 @@ async function start() {
                 await loadAutomaticGroupCursors();
 
               console.log(
-                `🧭 Cursores Supabase: Eletrônicos ${restored.eletronicos} | Fitness ${restored.fitness} | Perfumes ${restored.perfumes}`
+                `🧭 Cursores legacy/highlights: Eletrônicos ${restored.eletronicos} | Fitness ${restored.fitness} | Perfumes ${restored.perfumes} | contínuo salvo separadamente no Supabase`
               );
             } catch (error) {
               console.error(

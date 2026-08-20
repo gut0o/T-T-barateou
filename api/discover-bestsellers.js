@@ -7,6 +7,14 @@ import {
 } from "../lib/ml-bestsellers-discovery.js";
 
 import {
+  discoverCatalogProducts
+} from "../lib/ml-catalog-search-discovery.js";
+
+import {
+  matchesContinuousDiscoveryTitle
+} from "../lib/tt-continuous-discovery-queries.js";
+
+import {
   enrichBestSellerCandidates
 } from "../lib/ml-bestsellers-enrichment.js";
 
@@ -33,7 +41,9 @@ import {
   handlePublicationStatusAction,
   handleQueueDedupeAction,
   handleQueueListAction,
-  handleQueueSummaryAction
+  handleQueueSummaryAction,
+  handleContinuousDiscoverAction,
+  assertQueueAdmin
 } from "../lib/tt-queue-admin-actions.js";
 
 
@@ -292,6 +302,152 @@ async function predictCategory({
   };
 }
 
+
+async function handleCatalogSearchAction(req) {
+  assertQueueAdmin(req);
+
+  const tokenData = await getValidMlTokenData();
+  const group = String(req.query?.group || req.body?.group || "")
+    .trim()
+    .toLowerCase();
+  const catalogQuery = String(
+    req.query?.catalogQuery || req.body?.catalogQuery || ""
+  ).trim();
+
+  if (!catalogQuery) {
+    const error = new Error("catalogQuery é obrigatório.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const catalogOffset = Math.max(
+    0,
+    Math.floor(Number(req.query?.catalogOffset ?? req.body?.catalogOffset ?? 0) || 0)
+  );
+  const catalogLimit = Math.min(
+    Math.max(Math.floor(Number(req.query?.catalogLimit ?? req.body?.catalogLimit ?? 3) || 3), 1),
+    3
+  );
+
+  const search = await discoverCatalogProducts({
+    accessToken: tokenData.access_token,
+    query: catalogQuery,
+    offset: catalogOffset,
+    limit: catalogLimit
+  });
+
+  if (!search?.ok) {
+    return {
+      ...search,
+      action: "catalog-search",
+      group,
+      newOffers: [],
+      newQueuedCount: 0,
+      duplicateCount: 0
+    };
+  }
+
+  const enrichment = await enrichBestSellerCandidates({
+    accessToken: tokenData.access_token,
+    candidates: search.candidates,
+    limit: catalogLimit
+  });
+
+  const analyzedCandidates = [];
+  for (const candidate of enrichment.candidates) {
+    analyzedCandidates.push(
+      await buildAnalyzedCandidate({
+        candidate,
+        accessToken: tokenData.access_token
+      })
+    );
+  }
+
+  const readyCandidates = analyzedCandidates.filter((candidate) =>
+    candidate.automationReadiness === "ready_for_next_stage" &&
+    matchesContinuousDiscoveryTitle({
+      group,
+      title: candidate.title
+    })
+  );
+
+  const shortlist = sortShortlist(readyCandidates);
+  const publicationPlan = buildPublicationPlan({
+    shortlist,
+    maxPublications: 3
+  });
+
+  const persistQueue = queryFlag(req.query?.queue ?? req.body?.queue);
+  let queuePersistence = {
+    requested: persistQueue,
+    status: persistQueue ? "nothing_to_queue" : "not_requested",
+    queuedCount: 0,
+    newQueuedCount: 0,
+    duplicateCount: 0,
+    results: []
+  };
+
+  if (persistQueue && publicationPlan.ready.length) {
+    const persistence = await queuePendingPublications(publicationPlan.ready);
+    queuePersistence = {
+      requested: true,
+      status: "queue_saved",
+      requestedCount: persistence.requestedCount,
+      queuedCount: persistence.queuedCount,
+      newQueuedCount: persistence.newQueuedCount,
+      duplicateCount: persistence.duplicateCount,
+      requeuedCount: persistence.requeuedCount || 0,
+      results: persistence.results
+    };
+  }
+
+  const newItemIds = new Set(
+    (queuePersistence.results || [])
+      .filter((item) => item?.queued === true && item?.alreadyQueued === false)
+      .map((item) => item.itemId)
+      .filter(Boolean)
+  );
+
+  const newOffers = publicationPlan.ready
+    .filter((offer) => newItemIds.has(offer.itemId))
+    .map((offer) => ({
+      itemId: offer.itemId || null,
+      productId: offer.productId || null,
+      catalogPageUrl: offer.catalogPageUrl || null,
+      title: offer.title || null,
+      price: offer.price ?? null,
+      originalPrice: offer.originalPrice ?? null,
+      discount: offer.discount ?? null,
+      ttCategoryId: offer.ttCategoryId || null,
+      ttCategoryName: offer.ttCategoryName || null,
+      affiliateLinkStatus: "pending"
+    }));
+
+  return {
+    ok: true,
+    action: "catalog-search",
+    source: search.source,
+    group,
+    catalogQuery,
+    paging: search.paging,
+    resultCount: search.resultCount,
+    candidateCount: search.candidates.length,
+    selectedProductCount: search.candidates.length,
+    enrichedResolvedCount: enrichment.resolvedCount,
+    analyzedCandidateCount: analyzedCandidates.length,
+    readyCount: publicationPlan.readyCount,
+    heldCount: publicationPlan.heldCount,
+    publicationPlan,
+    queuePersistence,
+    newQueuedCount: queuePersistence.newQueuedCount || 0,
+    duplicateCount: queuePersistence.duplicateCount || 0,
+    requeuedCount: queuePersistence.requeuedCount || 0,
+    newOffers,
+    accessTokenExposed: false,
+    refreshTokenExposed: false
+  };
+}
+
 export default async function handler(
   req,
   res
@@ -353,6 +509,42 @@ export default async function handler(
     ) {
       const result =
         await handleQueueSummaryAction(
+          req
+        );
+
+      return res
+        .status(200)
+        .json(
+          result
+        );
+    }
+
+    if (
+      action ===
+      "catalog-search"
+    ) {
+      const result =
+        await handleCatalogSearchAction(
+          req
+        );
+
+      return res
+        .status(
+          result?.ok === false
+            ? (result.httpStatus || 200)
+            : 200
+        )
+        .json(
+          result
+        );
+    }
+
+    if (
+      action ===
+      "continuous-discover"
+    ) {
+      const result =
+        await handleContinuousDiscoverAction(
           req
         );
 

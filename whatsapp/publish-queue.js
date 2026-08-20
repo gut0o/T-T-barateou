@@ -194,6 +194,31 @@ const AUTO_BATCH_DISCOVERY_ATTEMPTS =
     1
   );
 
+// Meta mínima do lote automático.
+// Continua tentando chegar a 3, mas se as 8 buscas normais não bastarem,
+// percorre o restante do pool para tentar garantir pelo menos 2 ofertas.
+const AUTO_BATCH_MIN_SEND =
+  Math.max(
+    Math.min(
+      Number(
+        process.env
+          .TT_AUTO_BATCH_MIN_SEND ||
+        2
+      ) || 2,
+      AUTO_BATCH_SIZE
+    ),
+    1
+  );
+
+// Quantidade atual de frentes configuradas em tt-discovery-seeds.js.
+// Serve como limite de segurança para permitir uma volta completa no pool
+// quando o mínimo ainda não foi atingido.
+const AUTO_BATCH_GROUP_POOL_SIZES = {
+  eletronicos: 24,
+  fitness: 24,
+  perfumes: 42
+};
+
 const AUTO_BATCH_GROUPS = [
   "eletronicos",
   "fitness",
@@ -2874,6 +2899,104 @@ async function sendEntryAutomatically(
   }
 }
 
+async function getOrPrepareReadyBatchItem(
+  sock,
+  group,
+  {
+    affiliateAttempts = 6
+  } = {}
+) {
+  // Primeiro aproveita o que já estiver pronto.
+  let entry =
+    await getReadyItem(
+      group,
+      {
+        ignorePreviewMemory:
+          true
+      }
+    );
+
+  if (entry) {
+    return entry;
+  }
+
+  // Uma oferta pode ser rejeitada pelo afiliado.
+  // Nesse caso, não queremos encerrar o lote se houver outras
+  // ofertas aguardando link logo atrás dela.
+  for (
+    let attempt = 1;
+    attempt <= affiliateAttempts;
+    attempt += 1
+  ) {
+    if (
+      !isSocketActive(
+        sock
+      )
+    ) {
+      throw connectionClosedError();
+    }
+
+    if (
+      !isAutomaticSendWindowOpen()
+    ) {
+      throw automaticWindowClosedError();
+    }
+
+    const generated =
+      await fillNextAffiliateLink(
+        sock,
+        {
+          group,
+          batchMode:
+            true
+        }
+      );
+
+    if (
+      generated
+    ) {
+      entry =
+        await waitForReadyBatchItem(
+          group
+        );
+
+      if (entry) {
+        return entry;
+      }
+    }
+
+    // Se fillNextAffiliateLink retornou false, pode ter sido porque:
+    // - uma oferta foi rejeitada definitivamente; ou
+    // - não existe mais nenhuma oferta aguardando link.
+    //
+    // Conferimos a fila antes de decidir parar.
+    const nextAwaiting =
+      await getAwaitingAffiliateItem(
+        group
+      );
+
+    if (
+      !nextAwaiting
+    ) {
+      break;
+    }
+
+    await sleep(
+      250
+    );
+  }
+
+  // Uma última leitura evita perder um ready que apareceu
+  // entre a geração e a atualização da fila.
+  return getReadyItem(
+    group,
+    {
+      ignorePreviewMemory:
+        true
+    }
+  );
+}
+
 async function waitForReadyBatchItem(
   group,
   {
@@ -3030,8 +3153,19 @@ async function processAutomaticBatchGroup(
     return 0;
   }
 
+  const poolSize =
+    Math.max(
+      Number(
+        AUTO_BATCH_GROUP_POOL_SIZES[
+          group
+        ] ||
+        AUTO_BATCH_DISCOVERY_ATTEMPTS
+      ) || AUTO_BATCH_DISCOVERY_ATTEMPTS,
+      AUTO_BATCH_DISCOVERY_ATTEMPTS
+    );
+
   console.log(
-    `${meta.emoji} Lote iniciado: ${meta.label} (máx. ${AUTO_BATCH_SIZE}) | cursor inicial ${automaticGroupCursors[group] || 0}`
+    `${meta.emoji} Lote iniciado: ${meta.label} (meta ${AUTO_BATCH_MIN_SEND}–${AUTO_BATCH_SIZE}) | cursor inicial ${automaticGroupCursors[group] || 0}`
   );
 
   let sentCount =
@@ -3048,7 +3182,10 @@ async function processAutomaticBatchGroup(
       0
     ) || 0;
 
-  let stopAfterCurrentPoolEnd =
+  let wrappedPool =
+    false;
+
+  let minimumExtensionLogged =
     false;
 
   while (
@@ -3079,63 +3216,54 @@ async function processAutomaticBatchGroup(
       break;
     }
 
-    // 1. Tenta aproveitar algo que já está pronto.
+    // Se ainda estamos abaixo do mínimo, podemos percorrer o pool inteiro.
+    // Depois de atingir o mínimo, voltamos ao limite normal de 8 buscas
+    // para tentar completar a terceira oferta sem alongar demais o ciclo.
+    const discoveryLimit =
+      sentCount <
+        AUTO_BATCH_MIN_SEND
+        ? poolSize
+        : AUTO_BATCH_DISCOVERY_ATTEMPTS;
+
+    if (
+      sentCount <
+        AUTO_BATCH_MIN_SEND &&
+      discoveryAttempts >=
+        AUTO_BATCH_DISCOVERY_ATTEMPTS &&
+      !minimumExtensionLogged
+    ) {
+      console.log(
+        `${meta.emoji} Mínimo ${AUTO_BATCH_MIN_SEND} ainda não atingido. Vou continuar procurando no restante do pool (até ${poolSize} frentes).`
+      );
+
+      minimumExtensionLogged =
+        true;
+    }
+
+    // 1. Aproveita ready e tenta preparar vários awaiting.
+    //    Se um link for rejected, tenta o próximo em vez de abandonar.
     let entry =
-      await getReadyItem(
+      await getOrPrepareReadyBatchItem(
+        sock,
         group,
         {
-          ignorePreviewMemory:
-            true
+          affiliateAttempts:
+            6
         }
       );
 
-    // 2. Se não está pronto, tenta gerar afiliado de algo já
-    //    descoberto/enfileirado.
-    if (!entry) {
-      const generated =
-        await fillNextAffiliateLink(
-          sock,
-          {
-            group,
-            batchMode:
-              true
-          }
-        );
-
-      if (
-        generated
-      ) {
-        // O backend/Blob pode levar alguns instantes para refletir
-        // awaiting_affiliate_link -> ready_to_publish.
-        // Não encerramos o lote só porque a primeira leitura ainda
-        // viu o estado antigo.
-        entry =
-          await waitForReadyBatchItem(
-            group
-          );
-
-        if (!entry) {
-          console.log(
-            `${meta.emoji} Link gerado, mas ready_to_publish ainda não apareceu após a espera.`
-          );
-        }
-      }
-    }
-
-    // 3. Se a fila daquele grupo está vazia, abre uma nova
-    //    frente de busca. Cada tentativa usa outra semente.
+    // 2. Se ainda não temos oferta pronta, descobre uma nova frente.
     if (
       !entry &&
-      !stopAfterCurrentPoolEnd &&
       discoveryAttempts <
-        AUTO_BATCH_DISCOVERY_ATTEMPTS
+        discoveryLimit
     ) {
       const attempt =
         discoveryAttempts +
         1;
 
       console.log(
-        `${meta.emoji} Busca ${attempt}/${AUTO_BATCH_DISCOVERY_ATTEMPTS}: ${meta.label} (cursor ${targetedCursor})`
+        `${meta.emoji} Busca ${attempt}/${discoveryLimit}: ${meta.label} (cursor ${targetedCursor})`
       );
 
       let result =
@@ -3179,32 +3307,41 @@ async function processAutomaticBatchGroup(
           1;
       }
 
-      const wrappedPool =
+      const justWrapped =
         targetedCursor <=
         previousCursor;
+
+      if (
+        justWrapped
+      ) {
+        wrappedPool =
+          true;
+
+        if (
+          sentCount <
+            AUTO_BATCH_MIN_SEND
+        ) {
+          console.log(
+            `${meta.emoji} Fim do pool alcançado, mas o mínimo ${AUTO_BATCH_MIN_SEND} ainda não foi atingido. Continuando do início até completar uma volta de busca.`
+          );
+        } else {
+          console.log(
+            `${meta.emoji} Fim do pool alcançado com o mínimo já atendido.`
+          );
+        }
+      }
 
       automaticGroupCursors[
         group
       ] =
         targetedCursor;
 
-      if (
-        wrappedPool
-      ) {
-        stopAfterCurrentPoolEnd =
-          true;
-
-        console.log(
-          `${meta.emoji} Fim do pool alcançado. Não vou voltar ao começo neste mesmo ciclo.`
-        );
-      }
-
-      // Depois da descoberta, volta ao topo para:
-      // ready → affiliate → send.
+      // Importante: volta ao topo para consumir as ofertas recém-enfileiradas
+      // ANTES de decidir que o pool acabou.
       continue;
     }
 
-    // 4. Todas as frentes foram consultadas e não há produto novo.
+    // 3. Sem ready e sem novas buscas possíveis.
     if (!entry) {
       break;
     }
@@ -3223,6 +3360,7 @@ async function processAutomaticBatchGroup(
         60000
       );
 
+      // Não quebra o lote. Pode haver outra oferta pronta/awaiting.
       continue;
     }
 
@@ -3244,8 +3382,21 @@ async function processAutomaticBatchGroup(
     );
   }
 
+  if (
+    sentCount <
+      AUTO_BATCH_MIN_SEND
+  ) {
+    console.log(
+      `${meta.emoji} ⚠️ Mínimo não atingido: ${meta.label} enviou ${sentCount}/${AUTO_BATCH_MIN_SEND}. O pool consultado não tinha ofertas novas/válidas suficientes sem repetir produtos.`
+    );
+  } else {
+    console.log(
+      `${meta.emoji} ✅ Mínimo atingido: ${meta.label} enviou ${sentCount}/${AUTO_BATCH_MIN_SEND} ou mais.`
+    );
+  }
+
   console.log(
-    `${meta.emoji} Lote concluído: ${meta.label} → ${sentCount}/${AUTO_BATCH_SIZE} | buscas ${discoveryAttempts}/${AUTO_BATCH_DISCOVERY_ATTEMPTS}`
+    `${meta.emoji} Lote concluído: ${meta.label} → ${sentCount}/${AUTO_BATCH_SIZE} | buscas ${discoveryAttempts}/${sentCount < AUTO_BATCH_MIN_SEND ? poolSize : Math.max(AUTO_BATCH_DISCOVERY_ATTEMPTS, discoveryAttempts)}${wrappedPool ? " | pool contornado" : ""}`
   );
 
   return sentCount;
@@ -3326,7 +3477,7 @@ async function runAutomaticBatchCycle(
       "🤖 ===== CICLO AUTOMÁTICO T&T ====="
     );
     console.log(
-      `🎯 Meta: até ${AUTO_BATCH_SIZE} por grupo`
+      `🎯 Meta: mínimo ${AUTO_BATCH_MIN_SEND}, alvo até ${AUTO_BATCH_SIZE} por grupo`
     );
 
     for (
@@ -3386,11 +3537,12 @@ async function runAutomaticBatchCycle(
         .jid,
       {
         text:
-          "🤖 *CICLO AUTOMÁTICO T&T CONCLUÍDO*\\n\\n" +
-          `📱 Eletrônicos: ${counts.eletronicos}/${AUTO_BATCH_SIZE}\\n` +
-          `💪 Fitness: ${counts.fitness}/${AUTO_BATCH_SIZE}\\n` +
-          `🌸 Perfumes: ${counts.perfumes}/${AUTO_BATCH_SIZE}\\n\\n` +
-          `📤 Total enviado: ${total}\\n` +
+          "🤖 *CICLO AUTOMÁTICO T&T CONCLUÍDO*\n\n" +
+          `📱 Eletrônicos: ${counts.eletronicos}/${AUTO_BATCH_SIZE}\n` +
+          `💪 Fitness: ${counts.fitness}/${AUTO_BATCH_SIZE}\n` +
+          `🌸 Perfumes: ${counts.perfumes}/${AUTO_BATCH_SIZE}\n\n` +
+          `🎯 Mínimo por grupo: ${AUTO_BATCH_MIN_SEND}\n` +
+          `📤 Total enviado: ${total}\n` +
           `⏸️ Próximo ciclo em ${Math.round(AUTO_BATCH_PAUSE_MS / 60000)} minutos.`
       }
     );
@@ -4007,10 +4159,10 @@ async function start() {
             AUTO_BATCH_ENABLED
           ) {
             console.log(
-              `📦 Lote: até ${AUTO_BATCH_SIZE} por grupo`
+              `📦 Lote: mínimo ${AUTO_BATCH_MIN_SEND}, alvo até ${AUTO_BATCH_SIZE} por grupo`
             );
             console.log(
-              `🔎 Pool: até ${AUTO_BATCH_DISCOVERY_ATTEMPTS} buscas por grupo/ciclo`
+              `🔎 Busca normal: até ${AUTO_BATCH_DISCOVERY_ATTEMPTS} frentes; abaixo do mínimo, percorre o pool inteiro`
             );
             console.log(
               "🔄 Pool rotativo: cada grupo continua do cursor anterior"

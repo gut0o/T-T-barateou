@@ -221,6 +221,11 @@ const CONTINUOUS_DISCOVERY_MAX_PAGES =
     Number(process.env.TT_CONTINUOUS_MAX_PAGES || 24) || 24
   );
 
+const FALLBACK_RESERVE_ENABLED =
+  String(process.env.TT_FALLBACK_RESERVE || "true")
+    .trim()
+    .toLowerCase() !== "false";
+
 const AUTO_BATCH_GROUPS = [
   "eletronicos",
   "fitness",
@@ -950,6 +955,62 @@ function discoverGroupCommand(
   return null;
 }
 
+
+function reserveGroupFromText(value) {
+  const normalized = normalizeAnswer(value);
+
+  if (["eletronicos", "eletronico", "eletronics"].includes(normalized)) {
+    return "eletronicos";
+  }
+
+  if (["fitness", "academia", "saude fitness"].includes(normalized)) {
+    return "fitness";
+  }
+
+  if (["perfumes", "perfume", "perfumaria"].includes(normalized)) {
+    return "perfumes";
+  }
+
+  return null;
+}
+
+function parseReserveCommand(text) {
+  const raw = String(text || "").trim();
+  const normalized = normalizeAnswer(raw);
+
+  if (!normalized.startsWith("reserva")) return null;
+
+  if (["reserva", "reserva ajuda", "reserva help"].includes(normalized)) {
+    return { action: "help" };
+  }
+
+  if (["reserva status", "status reserva"].includes(normalized)) {
+    return { action: "status" };
+  }
+
+  const removeMatch = normalized.match(/^reserva\s+remover\s+(\d+)$/);
+  if (removeMatch) {
+    return { action: "remove", id: Number(removeMatch[1]) };
+  }
+
+  const listMatch = normalized.match(/^reserva\s+lista(?:\s+(.+))?$/);
+  if (listMatch) {
+    const group = listMatch[1] ? reserveGroupFromText(listMatch[1]) : null;
+    return { action: "list", group };
+  }
+
+  const addMatch = normalized.match(/^reserva\s+(eletronicos?|eletronics|fitness|academia|saude fitness|perfumes?|perfumaria)\b/);
+  if (addMatch) {
+    return {
+      action: "add",
+      group: reserveGroupFromText(addMatch[1]),
+      links: extractAffiliateLinks(raw)
+    };
+  }
+
+  return { action: "help" };
+}
+
 function extractAffiliateLinks(text) {
   const matches =
     String(text || "")
@@ -1439,6 +1500,51 @@ async function getQueueSummary() {
     action:
       "queue-summary"
   });
+}
+
+
+async function getReserveSummary() {
+  return apiGet({ action: "reserve-summary" });
+}
+
+async function getReserveList({ group = null, status = "available", limit = 20 } = {}) {
+  return apiGet({
+    action: "reserve-list",
+    group,
+    status,
+    limit
+  });
+}
+
+async function addReserveLinks(group, links) {
+  return apiPost("reserve-add", {
+    group,
+    affiliateLinks: links
+  });
+}
+
+async function removeReserveItem(id) {
+  return apiPost("reserve-remove", { id });
+}
+
+async function materializeReserveItem(group) {
+  return apiPost("reserve-materialize", { group });
+}
+
+async function completeReserveItem(itemId, status, failureReason = null) {
+  try {
+    return await apiPost("reserve-complete", {
+      itemId,
+      status,
+      failureReason
+    });
+  } catch (error) {
+    // O item pode não ter vindo da reserva; isso nunca deve afetar o envio.
+    console.log(
+      `⚠️ Não consegui atualizar vínculo da reserva para ${itemId}: ${error?.message || error}`
+    );
+    return null;
+  }
 }
 
 async function recoverConnectionSendErrors() {
@@ -2076,6 +2182,14 @@ async function fillNextAffiliateLink(
           }
         );
 
+        await completeReserveItem(
+          entry.itemId,
+          "rejected",
+          affiliateLinkMismatch
+            ? "affiliate_link_mismatch"
+            : "affiliate_url_not_allowed"
+        );
+
         rememberHandled(
           recentAffiliateProducts,
           entry,
@@ -2196,6 +2310,17 @@ async function sendQueueSummary(
       `❌ Erro: ${counts.send_error || 0}`,
       `🚫 Rejeitadas: ${counts.rejected || 0}`
     ];
+
+    if (summary.reserve?.groups) {
+      lines.push(
+        "",
+        "🛟 *BANCO DE RESERVA*",
+        `📱 Eletrônicos: ${summary.reserve.groups.eletronicos?.available || 0}`,
+        `💪 Fitness: ${summary.reserve.groups.fitness?.available || 0}`,
+        `🌸 Perfumes: ${summary.reserve.groups.perfumes?.available || 0}`,
+        `📦 Total disponível: ${summary.reserve.totalAvailable || 0}`
+      );
+    }
 
     if (
       Array.isArray(
@@ -2572,6 +2697,141 @@ async function setManualMode(
   }
 }
 
+
+async function handleReserveCommand(sock, command) {
+  if (!command) return false;
+
+  const groupLabels = {
+    eletronicos: "📱 Eletrônicos",
+    fitness: "💪 Fitness",
+    perfumes: "🌸 Perfumes"
+  };
+
+  if (command.action === "help") {
+    await sock.sendMessage(routing.controlGroup.jid, {
+      text:
+        "🛟 *BANCO DE RESERVA T&T*\n\n" +
+        "Adicionar links:\n" +
+        "RESERVA ELETRONICOS <link>\n" +
+        "RESERVA FITNESS <link>\n" +
+        "RESERVA PERFUMES <link>\n\n" +
+        "Você pode mandar até 10 links na mesma mensagem.\n\n" +
+        "Consultar:\n" +
+        "RESERVA STATUS\n" +
+        "RESERVA LISTA\n" +
+        "RESERVA LISTA FITNESS\n" +
+        "RESERVA REMOVER <id>"
+    });
+    return true;
+  }
+
+  if (command.action === "status") {
+    const result = await getReserveSummary();
+    const summary = result.summary || {};
+    const groups = summary.groups || {};
+
+    await sock.sendMessage(routing.controlGroup.jid, {
+      text:
+        "🛟 *BANCO DE RESERVA*\n\n" +
+        `📱 Eletrônicos: ${groups.eletronicos?.available || 0}\n` +
+        `💪 Fitness: ${groups.fitness?.available || 0}\n` +
+        `🌸 Perfumes: ${groups.perfumes?.available || 0}\n\n` +
+        `📦 Total disponível: ${summary.totalAvailable || 0}\n` +
+        "ℹ️ A reserva só é usada quando a descoberta automática não consegue atingir o mínimo do grupo."
+    });
+    return true;
+  }
+
+  if (command.action === "list") {
+    const result = await getReserveList({
+      group: command.group || null,
+      status: "available",
+      limit: 20
+    });
+
+    const entries = result.reserve?.entries || [];
+    const lines = [
+      "🛟 *RESERVA DISPONÍVEL*",
+      command.group ? `Grupo: ${groupLabels[command.group] || command.group}` : "Todos os grupos",
+      ""
+    ];
+
+    if (!entries.length) {
+      lines.push("Nenhum link disponível.");
+    } else {
+      entries.forEach((entry) => {
+        lines.push(
+          `#${entry.id} · ${groupLabels[entry.group] || entry.group}`,
+          `${entry.title || "Oferta sem título"}`,
+          entry.price !== null ? `💰 ${formatMoney(entry.price)}` : "",
+          ""
+        );
+      });
+    }
+
+    await sock.sendMessage(routing.controlGroup.jid, {
+      text: lines.filter((line) => line !== null && line !== undefined).join("\n").trim()
+    });
+    return true;
+  }
+
+  if (command.action === "remove") {
+    const result = await removeReserveItem(command.id);
+
+    await sock.sendMessage(routing.controlGroup.jid, {
+      text: result.removed
+        ? `🗑️ Reserva #${command.id} removida.`
+        : `⚠️ Não encontrei a reserva #${command.id}.`
+    });
+    return true;
+  }
+
+  if (command.action === "add") {
+    if (!command.group || !command.links?.length) {
+      await sock.sendMessage(routing.controlGroup.jid, {
+        text:
+          "⚠️ Use, por exemplo:\n\n" +
+          "RESERVA PERFUMES https://...\n\n" +
+          "Você pode colocar até 10 links na mesma mensagem."
+      });
+      return true;
+    }
+
+    await sock.sendMessage(routing.controlGroup.jid, {
+      text: `🛟 Adicionando ${command.links.length} link(s) à reserva de ${groupLabels[command.group] || command.group}...`
+    });
+
+    const result = await addReserveLinks(command.group, command.links);
+    const lines = [
+      "🛟 *RESULTADO DA RESERVA*",
+      "",
+      `${groupLabels[command.group] || command.group}`,
+      `✅ Adicionados: ${result.addedCount || 0}`,
+      `♻️ Já estavam na reserva: ${result.duplicateCount || 0}`,
+      `❌ Falhas: ${result.failedCount || 0}`
+    ];
+
+    for (const item of result.results || []) {
+      lines.push("", `${item.id ? `#${item.id} · ` : ""}${item.title || item.originalUrl}`);
+      if (item.added) lines.push("✅ disponível para fallback");
+      else if (item.duplicate) lines.push("♻️ já estava guardado");
+      else lines.push(`❌ ${item.error || item.status || "falha"}`);
+    }
+
+    const available = result.summary?.groups?.[command.group]?.available;
+    if (Number.isFinite(Number(available))) {
+      lines.push("", `📦 Estoque disponível neste grupo: ${available}`);
+    }
+
+    await sock.sendMessage(routing.controlGroup.jid, {
+      text: lines.join("\n")
+    });
+    return true;
+  }
+
+  return false;
+}
+
 async function handleAffiliateLinksFromControl(
   sock,
   links
@@ -2762,6 +3022,12 @@ async function sendEntryAutomatically(
           sent?.key?.id ||
           null
       }
+    );
+
+    await completeReserveItem(
+      entry.itemId,
+      "used",
+      null
     );
 
     rememberHandled(
@@ -3208,6 +3474,45 @@ async function processAutomaticBatchGroup(
       discoveryAttempts += 1;
       // Volta ao topo para consumir tudo que acabou de entrar na fila.
       continue;
+    }
+
+    if (
+      !entry &&
+      sentCount < AUTO_BATCH_MIN_SEND &&
+      discoveryAttempts >= discoveryLimit &&
+      FALLBACK_RESERVE_ENABLED
+    ) {
+      console.log(
+        `${meta.emoji} 🛟 Descoberta automática não completou o mínimo. Consultando Banco de Reserva...`
+      );
+
+      try {
+        const reserve = await materializeReserveItem(group);
+
+        if (reserve?.queued) {
+          console.log(
+            `${meta.emoji} 🛟 Reserva #${reserve.reserve?.id || "?"} preparada: ${reserve.title || reserve.itemId}`
+          );
+          // A oferta foi colocada na fila; volta ao topo para gerar/validar
+          // o link afiliado e enviar pelo fluxo normal.
+          continue;
+        }
+
+        if (reserve?.empty) {
+          console.log(
+            `${meta.emoji} 🛟 Banco de Reserva vazio para ${meta.label}.`
+          );
+        } else {
+          console.log(
+            `${meta.emoji} 🛟 Nenhuma reserva utilizável foi encontrada nesta tentativa.`
+          );
+        }
+      } catch (error) {
+        console.error(
+          `${meta.emoji} ⚠️ Banco de Reserva ${meta.label}:`,
+          error?.message || error
+        );
+      }
     }
 
     if (!entry) break;
@@ -4010,6 +4315,9 @@ async function start() {
               "🔁 Reuso: após 30 dias somente se preço/desconto/oferta mudar"
             );
             console.log(
+              `🛟 Banco de Reserva: ${FALLBACK_RESERVE_ENABLED ? "SIM" : "NÃO"} | usado só abaixo do mínimo`
+            );
+            console.log(
               `⏸️ Pausa após ciclo: ${AUTO_BATCH_PAUSE_MS} ms`
             );
             console.log(
@@ -4044,7 +4352,7 @@ async function start() {
             );
           }
           console.log(
-            `💬 Comandos em ${routing.controlGroup.name}: STATUS | MANUAL ON | MANUAL OFF | DESCOBRIR | DESCOBRIR ELETRONICOS | DESCOBRIR FITNESS | DESCOBRIR PERFUMES | cole um link ML/meli.la`
+            `💬 Comandos em ${routing.controlGroup.name}: STATUS | MANUAL ON/OFF | DESCOBRIR ... | RESERVA STATUS | RESERVA LISTA | RESERVA ELETRONICOS/FITNESS/PERFUMES <link> | cole um link ML/meli.la`
           );
           console.log(
             `✋ Modo manual: ${manualModeEnabled ? "ATIVO" : "DESLIGADO"}`
@@ -4340,6 +4648,20 @@ async function start() {
           ) {
             await sendManualModeStatus(
               sock
+            );
+
+            continue;
+          }
+
+          const reserveCommand =
+            parseReserveCommand(
+              text
+            );
+
+          if (reserveCommand) {
+            await handleReserveCommand(
+              sock,
+              reserveCommand
             );
 
             continue;

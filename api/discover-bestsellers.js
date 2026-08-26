@@ -43,6 +43,12 @@ import {
   handleQueueListAction,
   handleQueueSummaryAction,
   handleContinuousDiscoverAction,
+  handleReserveAddAction,
+  handleReserveCompleteAction,
+  handleReserveListAction,
+  handleReserveMaterializeAction,
+  handleReserveRemoveAction,
+  handleReserveSummaryAction,
   assertQueueAdmin
 } from "../lib/tt-queue-admin-actions.js";
 
@@ -486,6 +492,72 @@ export default async function handler(
       )
         .trim()
         .toLowerCase();
+
+    if (action === "reserve-summary") {
+      const result = await handleReserveSummaryAction(req);
+      return res.status(200).json(result);
+    }
+
+    if (action === "reserve-list") {
+      const result = await handleReserveListAction(req);
+      return res.status(200).json(result);
+    }
+
+    if (action === "reserve-add") {
+      if (req.method !== "POST") {
+        return res.status(405).json({
+          ok: false,
+          error: "Use POST para adicionar links à reserva.",
+          accessTokenExposed: false,
+          refreshTokenExposed: false
+        });
+      }
+
+      const result = await handleReserveAddAction(req);
+      return res.status(result.failedCount > 0 ? 207 : 200).json(result);
+    }
+
+    if (action === "reserve-remove") {
+      if (req.method !== "POST") {
+        return res.status(405).json({
+          ok: false,
+          error: "Use POST para remover um item da reserva.",
+          accessTokenExposed: false,
+          refreshTokenExposed: false
+        });
+      }
+
+      const result = await handleReserveRemoveAction(req);
+      return res.status(200).json(result);
+    }
+
+    if (action === "reserve-materialize") {
+      if (req.method !== "POST") {
+        return res.status(405).json({
+          ok: false,
+          error: "Use POST para consumir a reserva.",
+          accessTokenExposed: false,
+          refreshTokenExposed: false
+        });
+      }
+
+      const result = await handleReserveMaterializeAction(req);
+      return res.status(200).json(result);
+    }
+
+    if (action === "reserve-complete") {
+      if (req.method !== "POST") {
+        return res.status(405).json({
+          ok: false,
+          error: "Use POST para concluir um item da reserva.",
+          accessTokenExposed: false,
+          refreshTokenExposed: false
+        });
+      }
+
+      const result = await handleReserveCompleteAction(req);
+      return res.status(200).json(result);
+    }
 
     if (
       action ===

@@ -1,111 +1,181 @@
-# T&T — Etapa 6.18W — mínimo 2 ofertas por grupo
+# T&T — Etapa 6.18Z — Banco de Reserva
 
-## Nova regra
+Esta etapa adiciona um banco manual de links no Supabase para proteger o T&T
+contra períodos em que a descoberta automática não consiga achar ofertas novas.
 
-Cada ciclo continua tendo alvo de até 3 ofertas:
+## Regra do fallback
+
+O fluxo automático continua nesta ordem:
 
 ```text
-Eletrônicos: mínimo 2, alvo 3
-Fitness:     mínimo 2, alvo 3
-Perfumes:    mínimo 2, alvo 3
+1. fila normal
+2. descoberta contínua products/search
+3. highlights complementar
+4. até 24 páginas para tentar atingir o mínimo
+5. ainda ficou abaixo de 2?
+   ↓
+   BANCO DE RESERVA
 ```
 
-## Como funciona
+A reserva é usada **somente para completar o mínimo de 2**. Se o T&T já mandou
+2 ofertas no grupo, ele preserva o estoque de reserva em vez de gastá-lo para
+chegar a 3.
 
-Primeiro o T&T usa as 8 buscas normais.
+O dedupe continua valendo: uma reserva que já está na fila/histórico não é
+forçada a publicar novamente.
 
-Se já conseguiu 2 ou 3:
+## Comandos no grupo de controle
+
+Adicionar um ou vários links:
 
 ```text
-✅ segue normalmente
+RESERVA ELETRONICOS https://mercadolivre...
+RESERVA FITNESS https://mercadolivre...
+RESERVA PERFUMES https://mercadolivre...
 ```
 
-Se ainda estiver com 0 ou 1:
+Até 10 links podem ser colocados na mesma mensagem.
+
+Consultar:
 
 ```text
-🔎 continua procurando
-🔎 percorre o restante do pool daquele grupo
-🔎 tenta consumir todas as ofertas awaiting/ready encontradas
+RESERVA STATUS
+RESERVA LISTA
+RESERVA LISTA ELETRONICOS
+RESERVA LISTA FITNESS
+RESERVA LISTA PERFUMES
 ```
 
-Pools atuais:
+Remover:
 
 ```text
-Eletrônicos: 24 frentes
-Fitness:     24 frentes
-Perfumes:    42 frentes
+RESERVA REMOVER 123
 ```
 
-## Correção importante
-
-Antes, uma oferta `AFFILIATE_LINK_MISMATCH` podia ser rejeitada e o lote
-encerrar mesmo existindo outras ofertas novas aguardando link.
-
-Agora:
+Ajuda:
 
 ```text
-produto A → rejected
-produto B → tenta gerar link
-produto C → tenta gerar link
-...
+RESERVA
 ```
 
-A rejeição de um item não abandona os seguintes.
+O comando normal `STATUS` também mostra quantas reservas disponíveis existem em
+cada grupo.
 
-## Dedupe continua
-
-O T&T NÃO repete produto já enviado apenas para preencher o mínimo.
-
-Portanto:
+## Estados da reserva
 
 ```text
-mínimo 2 = sempre que existirem 2 ofertas novas/válidas no pool
+available  = pronta para uso futuro
+claimed    = sendo validada pelo backend
+queued     = já virou oferta na fila normal
+used       = enviada com sucesso no WhatsApp
+rejected   = não passou nas regras/link afiliado
+expired    = o link não pôde mais ser resolvido
+ duplicate = produto já estava na fila/histórico
+removed    = removida manualmente
 ```
 
-Se uma volta completa no pool não tiver 2 novas ofertas, o log deixa explícito:
+## Validação na hora do uso
+
+O link não fica congelado com preço antigo. Quando a reserva é necessária, o
+backend abre a URL novamente e obtém os dados atuais da oferta antes de
+colocá-la na fila.
+
+Depois ela passa pelo fluxo normal:
 
 ```text
-⚠️ Mínimo não atingido ... sem ofertas novas/válidas suficientes sem repetir produtos.
+resolver oferta atual
+→ dedupe
+→ gerar link afiliado
+→ validar link afiliado
+→ enviar
 ```
 
-Garantir 2 mesmo com o pool completamente esgotado exigiria permitir repetição,
-o que esta etapa deliberadamente não faz.
+Se o Mercado Livre rejeitar a URL ou o link resolver para outro produto, a
+reserva é marcada como `rejected` e o bot tenta outra.
 
-## Instalação
+## FIFO e recuperação
 
-Substitua somente:
+A reserva usa FIFO: o link disponível mais antigo é tentado primeiro. Se o backend
+cair depois de marcar um link como `claimed`, claims parados por mais de 10 minutos
+voltam automaticamente para `available`.
+
+## Arquivos desta etapa
 
 ```text
+supabase/6.18Z_fallback_reserve.sql
+lib/tt-fallback-reserve-store.js
+lib/tt-queue-admin-actions.js
+api/discover-bestsellers.js
 whatsapp/publish-queue.js
 ```
 
-Não precisa alterar Vercel, Supabase, grupos nem o script PM2.
+## Aplicar — ordem importante
 
-Com o arquivo substituído:
+### 1. Supabase
+
+Abra **Supabase → SQL Editor** e execute o conteúdo de:
+
+```text
+supabase/6.18Z_fallback_reserve.sql
+```
+
+### 2. Copie os arquivos do ZIP para o projeto
+
+Substitua os existentes quando solicitado.
+
+### 3. Git
 
 ```powershell
-git add whatsapp/publish-queue.js
-git commit -m "Garante busca minima de duas ofertas por grupo"
+git add api/discover-bestsellers.js lib/tt-fallback-reserve-store.js lib/tt-queue-admin-actions.js whatsapp/publish-queue.js supabase/6.18Z_fallback_reserve.sql
+git commit -m "Adiciona banco de reserva para fallback"
 git push
 ```
 
-Depois reinicie o processo existente:
+### 4. Espere o deploy da Vercel terminar
+
+Não reinicie o publisher antes do deploy concluir, pois as novas actions ficam
+no endpoint existente `/api/discover-bestsellers`.
+
+### 5. Reinicie o PM2
 
 ```powershell
 pm2 restart tt-barateou
-```
-
-Não use `--update-env` para esta alteração, pois não é necessário.
-
-Veja os logs:
-
-```powershell
 pm2 logs tt-barateou --lines 100
 ```
 
-No startup deverá aparecer:
+No startup esperado:
 
 ```text
-📦 Lote: mínimo 2, alvo até 3 por grupo
-🔎 Busca normal: até 8 frentes; abaixo do mínimo, percorre o pool inteiro
+🛟 Banco de Reserva: SIM | usado só abaixo do mínimo
 ```
+
+## Teste depois do deploy
+
+Primeiro, sem precisar esperar o pool acabar:
+
+```text
+RESERVA PERFUMES <um link do Mercado Livre>
+RESERVA FITNESS <um link do Mercado Livre>
+RESERVA ELETRONICOS <um link do Mercado Livre>
+RESERVA STATUS
+RESERVA LISTA
+```
+
+Isso valida cadastro, resolução, persistência e leitura.
+
+O teste de consumo automático pode ser feito depois de forma controlada sem
+apagar o histórico de produtos.
+
+## Não mudou
+
+- mínimo 2 / alvo 3;
+- descoberta contínua paginada;
+- highlights como fallback complementar;
+- dedupe e reuso após 30 dias com mudança de oferta;
+- horário automático 09:00–22:00;
+- modo manual 24h;
+- PM2;
+- grupos reais;
+- validação de affiliate mismatch;
+- rejeição de URL não permitida;
+- reconexão do WhatsApp.

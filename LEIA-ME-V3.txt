@@ -1,0 +1,27 @@
+T&T Barateou — Perfumes semi-automático V3
+
+Esta V3 é uma correção em cima da V2 já aplicada.
+
+Por que existe:
+A V2 desligou a descoberta automática de Perfumes durante os ciclos e bloqueou
+DESCOBRIR PERFUMES, mas ainda existia um caminho indireto: o comando genérico
+DESCOBRIR podia chamar a descoberta global do backend e enfileirar Perfumes.
+
+A V3 fecha esse caminho:
+- DESCOBRIR passa a procurar somente Eletrônicos e Fitness.
+- Descoberta direcionada gera link afiliado somente para o grupo solicitado.
+- Perfumes continua sendo consumido somente a partir de RESERVA PERFUMES.
+
+Como aplicar:
+1. Extraia os arquivos na raiz do projeto.
+2. Rode:
+   node apply-perfumes-semi-auto-v3.mjs
+3. Valide:
+   node --check whatsapp/publish-queue.js
+4. Confira:
+   git --no-pager diff -- whatsapp/publish-queue.js
+
+IMPORTANTE:
+Antes de colocar o bot em produção com esse modo, zere a fila/histórico antigo
+como já foi combinado, para nenhum perfume descoberto antes da mudança ficar
+pendente na fila.

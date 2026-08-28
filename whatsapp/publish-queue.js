@@ -2496,6 +2496,19 @@ async function triggerAutoDiscovery(
     group = null
   } = {}
 ) {
+  if (group === "perfumes") {
+    await sock.sendMessage(
+      routing.controlGroup.jid,
+      {
+        text:
+          "🌸 *PERFUMES EM MODO SEMI-AUTOMÁTICO*\n\n" +
+          "A descoberta automática de perfumes está desligada.\n" +
+          "Abasteça a fila com *RESERVA PERFUMES <links>* (até 10 por mensagem).\n" +
+          "O bot vai consumir esses links sozinho durante os ciclos do dia."
+      }
+    );
+    return;
+  }
   if (
     actionInProgress ||
     discoveryInProgress
@@ -2578,7 +2591,11 @@ async function triggerAutoDiscovery(
       !affiliateSessionBlocked
     ) {
       await fillNextAffiliateLink(
-        sock
+        sock,
+        {
+          group:
+            group || null
+        }
       );
     }
   } catch (error) {
@@ -2737,7 +2754,7 @@ async function handleReserveCommand(sock, command) {
         `💪 Fitness: ${groups.fitness?.available || 0}\n` +
         `🌸 Perfumes: ${groups.perfumes?.available || 0}\n\n` +
         `📦 Total disponível: ${summary.totalAvailable || 0}\n` +
-        "ℹ️ A reserva só é usada quando a descoberta automática não consegue atingir o mínimo do grupo."
+        "ℹ️ Eletrônicos/Fitness: reserva é fallback. Perfumes: reserva é a fila semi-automática principal."
     });
     return true;
   }
@@ -3411,6 +3428,11 @@ async function processAutomaticBatchGroup(
   const meta = AUTO_BATCH_LABELS[group];
   if (!meta) return 0;
 
+  // PERFUMES_SEMI_AUTO_RESERVE_ONLY_V2
+  // Perfumes não faz descoberta automática: usa somente os links curados
+  // adicionados pelo usuário em RESERVA PERFUMES.
+  const reserveOnly = group === "perfumes";
+
   console.log(
     `${meta.emoji} Lote iniciado: ${meta.label} (meta ${AUTO_BATCH_MIN_SEND}–${AUTO_BATCH_SIZE}) | descoberta contínua`
   );
@@ -3449,7 +3471,46 @@ async function processAutomaticBatchGroup(
       affiliateAttempts: 8
     });
 
-    if (!entry && discoveryAttempts < discoveryLimit) {
+    if (!entry && reserveOnly) {
+      console.log(
+        `${meta.emoji} 🌸 Fila semi-automática: buscando próximo link escolhido em RESERVA PERFUMES...`
+      );
+
+      try {
+        const reserve = await materializeReserveItem(group);
+
+        if (reserve?.queued) {
+          console.log(
+            `${meta.emoji} 🌸 Reserva #${reserve.reserve?.id || "?"} preparada: ${reserve.title || reserve.itemId}`
+          );
+
+          // A reserva foi reaberta com dados atuais e colocada na fila.
+          // Voltamos ao topo para gerar/validar o meli.la e publicar.
+          continue;
+        }
+
+        if (reserve?.empty) {
+          console.log(
+            `${meta.emoji} 🌸 Fila de perfumes vazia. Nenhum perfume será descoberto automaticamente.`
+          );
+        } else {
+          console.log(
+            `${meta.emoji} 🌸 Nenhum link de perfume utilizável nesta tentativa.`
+          );
+        }
+      } catch (error) {
+        console.error(
+          `${meta.emoji} ⚠️ Fila semi-automática de Perfumes:`,
+          error?.message || error
+        );
+      }
+
+      // Sem link manual utilizável: encerra apenas Perfumes neste ciclo.
+      // Eletrônicos e Fitness continuam normalmente nos próximos ciclos.
+      break;
+    }
+
+    if (!entry && !reserveOnly && discoveryAttempts < discoveryLimit) {
       const attempt = discoveryAttempts + 1;
       console.log(
         `${meta.emoji} Busca contínua ${attempt}/${discoveryLimit}: ${meta.label}`
@@ -3478,6 +3539,7 @@ async function processAutomaticBatchGroup(
 
     if (
       !entry &&
+      !reserveOnly &&
       sentCount < AUTO_BATCH_MIN_SEND &&
       discoveryAttempts >= discoveryLimit &&
       FALLBACK_RESERVE_ENABLED
@@ -4318,6 +4380,9 @@ async function start() {
               `🛟 Banco de Reserva: ${FALLBACK_RESERVE_ENABLED ? "SIM" : "NÃO"} | usado só abaixo do mínimo`
             );
             console.log(
+              "🌸 Perfumes: SEMI-AUTOMÁTICO | fila via RESERVA PERFUMES | sem descoberta automática"
+            );
+            console.log(
               `⏸️ Pausa após ciclo: ${AUTO_BATCH_PAUSE_MS} ms`
             );
             console.log(
@@ -4755,8 +4820,22 @@ async function start() {
               text
             )
           ) {
+            // PERFUMES_SEMI_AUTO_GENERIC_DISCOVERY_GUARD_V3
+            // O comando genérico procura apenas os grupos 100% automáticos.
             await triggerAutoDiscovery(
-              sock
+              sock,
+              {
+                group:
+                  "eletronicos"
+              }
+            );
+
+            await triggerAutoDiscovery(
+              sock,
+              {
+                group:
+                  "fitness"
+              }
             );
 
             continue;

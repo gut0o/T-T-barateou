@@ -1,27 +1,55 @@
-T&T Barateou — Perfumes semi-automático V3
+CORREÇÃO V4.2
+Este pacote corrige os erros do instalador anterior (meta/TABLE) e foi testado executando o instalador completo em uma estrutura simulada antes de gerar este ZIP.
 
-Esta V3 é uma correção em cima da V2 já aplicada.
+T&T BARATEOU — PERFUMES SEMI-AUTOMÁTICOS CIRCULARES (V4)
 
-Por que existe:
-A V2 desligou a descoberta automática de Perfumes durante os ciclos e bloqueou
-DESCOBRIR PERFUMES, mas ainda existia um caminho indireto: o comando genérico
-DESCOBRIR podia chamar a descoberta global do backend e enfileirar Perfumes.
+ATENÇÃO: os dois arquivos deste ZIP têm OS MESMOS NOMES da V3.
+Pode extrair na raiz do projeto e escolher "Substituir os arquivos no destino".
+Você não precisa apagar os instaladores anteriores.
 
-A V3 fecha esse caminho:
-- DESCOBRIR passa a procurar somente Eletrônicos e Fitness.
-- Descoberta direcionada gera link afiliado somente para o grupo solicitado.
-- Perfumes continua sendo consumido somente a partir de RESERVA PERFUMES.
+O QUE A V4 FAZ
 
-Como aplicar:
-1. Extraia os arquivos na raiz do projeto.
-2. Rode:
+📱 Eletrônicos
+- Continua automático.
+- Mantém a regra normal de 30 dias.
+
+💪 Fitness
+- Continua automático.
+- Mantém a regra normal de 30 dias.
+
+🌸 Perfumes
+- Continua SEM descoberta automática.
+- Usa somente links colocados por você em RESERVA PERFUMES.
+- A lista vira circular.
+- Depois que todos forem usados, o bot volta ao mais antigo quando ele completar 4 horas desde o último envio.
+- Antes de cada novo envio o anúncio é aberto novamente, os dados são atualizados e um NOVO link meli.la é gerado/validado.
+- Link inválido, oferta removida ou falha permanente é pulada/rejeitada.
+- A regra especial de 4 horas vale SOMENTE para Perfumes.
+
+COMO APLICAR
+
+1. Extraia este ZIP na raiz do projeto.
+2. Quando o Windows perguntar, escolha SUBSTITUIR os arquivos.
+3. Rode o mesmo comando que você já usou na V3:
+
    node apply-perfumes-semi-auto-v3.mjs
-3. Valide:
-   node --check whatsapp/publish-queue.js
-4. Confira:
-   git --no-pager diff -- whatsapp/publish-queue.js
 
-IMPORTANTE:
-Antes de colocar o bot em produção com esse modo, zere a fila/histórico antigo
-como já foi combinado, para nenhum perfume descoberto antes da mudança ficar
-pendente na fila.
+4. Depois valide:
+
+   node --check whatsapp/publish-queue.js
+   node --check lib/tt-fallback-reserve-store.js
+   node --check lib/tt-pending-publication-store.js
+   node --check lib/tt-queue-admin-actions.js
+
+Se os quatro comandos não mostrarem erro, rode:
+
+   git --no-pager diff -- whatsapp/publish-queue.js lib/tt-fallback-reserve-store.js lib/tt-pending-publication-store.js lib/tt-queue-admin-actions.js
+
+IMPORTANTE
+
+- Não precisa criar variável nova: o padrão é 4 horas.
+- Se no futuro quiser mudar, existe TT_PERFUME_REUSE_HOURS, mas não é necessário agora.
+- Nenhum secret é alterado.
+- Nenhuma sessão do WhatsApp é alterada.
+- Este instalador não liga o PM2.
+- Antes do primeiro uso em produção, mantenha a limpeza da fila/histórico antigo que já estava planejada.

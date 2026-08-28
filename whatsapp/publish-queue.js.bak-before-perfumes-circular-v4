@@ -2496,29 +2496,6 @@ async function triggerAutoDiscovery(
     group = null
   } = {}
 ) {
-  // PERFUMES_CIRCULAR_V4
-  // Qualquer descoberta genérica é dividida somente entre os dois grupos
-  // 100% automáticos. Perfumes nunca entra por descoberta.
-  if (!group) {
-    await triggerAutoDiscovery(
-      sock,
-      {
-        group:
-          "eletronicos"
-      }
-    );
-
-    await triggerAutoDiscovery(
-      sock,
-      {
-        group:
-          "fitness"
-      }
-    );
-
-    return;
-  }
-
   if (group === "perfumes") {
     await sock.sendMessage(
       routing.controlGroup.jid,
@@ -2777,7 +2754,7 @@ async function handleReserveCommand(sock, command) {
         `💪 Fitness: ${groups.fitness?.available || 0}\n` +
         `🌸 Perfumes: ${groups.perfumes?.available || 0}\n\n` +
         `📦 Total disponível: ${summary.totalAvailable || 0}\n` +
-        "ℹ️ Eletrônicos/Fitness: reserva é fallback. Perfumes: fila circular semi-automática; links usados voltam após 4h."
+        "ℹ️ Eletrônicos/Fitness: reserva é fallback. Perfumes: reserva é a fila semi-automática principal."
     });
     return true;
   }
@@ -3514,7 +3491,7 @@ async function processAutomaticBatchGroup(
 
         if (reserve?.empty) {
           console.log(
-            `${meta.emoji} 🌸 Sem perfume disponível agora (fila vazia ou links aguardando o intervalo de reuso). Nenhum perfume será descoberto automaticamente.`
+            `${meta.emoji} 🌸 Fila de perfumes vazia. Nenhum perfume será descoberto automaticamente.`
           );
         } else {
           console.log(
@@ -4403,7 +4380,7 @@ async function start() {
               `🛟 Banco de Reserva: ${FALLBACK_RESERVE_ENABLED ? "SIM" : "NÃO"} | usado só abaixo do mínimo`
             );
             console.log(
-              "🌸 Perfumes: SEMI-AUTOMÁTICO CIRCULAR | RESERVA PERFUMES | reuso padrão 4h | sem descoberta automática"
+              "🌸 Perfumes: SEMI-AUTOMÁTICO | fila via RESERVA PERFUMES | sem descoberta automática"
             );
             console.log(
               `⏸️ Pausa após ciclo: ${AUTO_BATCH_PAUSE_MS} ms`

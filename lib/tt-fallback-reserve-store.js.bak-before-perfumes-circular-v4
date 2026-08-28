@@ -148,14 +148,9 @@ function rowToReserve(row) {
 }
 
 async function findActiveDuplicate({ group, originalUrl, productId, itemId }) {
-  const activeStatusFilter =
-    group === "perfumes"
-      ? "status=in.(available,claimed,queued,used)"
-      : "status=in.(available,claimed,queued)";
-
   const filters = [
     `group_name=eq.${encodeURIComponent(group)}`,
-    activeStatusFilter,
+    "status=in.(available,claimed,queued)",
     "select=*",
     "order=added_at.asc",
     "limit=1"
@@ -292,7 +287,7 @@ export async function listFallbackReserve({
 
 export async function summarizeFallbackReserve() {
   const { payload } = await supabaseRequest(
-    `${TABLE}?status=in.(available,claimed,queued,used)&select=id,group_name,status&order=added_at.asc&limit=5000`
+    `${TABLE}?status=in.(available,claimed,queued)&select=id,group_name,status&order=added_at.asc&limit=5000`
   );
 
   const rows = Array.isArray(payload) ? payload : [];
@@ -346,64 +341,6 @@ export async function recoverStaleFallbackClaims({ maxAgeMinutes = 10 } = {}) {
   };
 }
 
-// PERFUMES_CIRCULAR_V4
-function perfumeReuseCooldownMs() {
-  const hours = Math.min(
-    Math.max(
-      Number(process.env.TT_PERFUME_REUSE_HOURS || 4) || 4,
-      1
-    ),
-    24
-  );
-
-  return hours * 60 * 60 * 1000;
-}
-
-async function recycleNextEligibleUsedPerfume() {
-  const cutoff = new Date(
-    Date.now() - perfumeReuseCooldownMs()
-  ).toISOString();
-
-  const { payload } = await supabaseRequest(
-    `${TABLE}?group_name=eq.perfumes` +
-      "&status=eq.used" +
-      `&used_at=lte.${encodeURIComponent(cutoff)}` +
-      "&select=*" +
-      "&order=used_at.asc" +
-      "&limit=10"
-  );
-
-  const rows = Array.isArray(payload) ? payload : [];
-
-  for (const row of rows) {
-    const now = new Date().toISOString();
-
-    // PATCH condicional: se outra instância já reciclou, esta não pega o mesmo.
-    const recycled = await supabaseRequest(
-      `${TABLE}?id=eq.${encodeURIComponent(row.id)}&status=eq.used`,
-      {
-        method: "PATCH",
-        body: {
-          status: "available",
-          current_item_id: null,
-          claimed_at: null,
-          queued_at: null,
-          failure_reason: null,
-          last_checked_at: now,
-          updated_at: now
-        },
-        prefer: "return=representation"
-      }
-    );
-
-    if (Array.isArray(recycled.payload) && recycled.payload.length) {
-      return rowToReserve(recycled.payload[0]);
-    }
-  }
-
-  return null;
-}
-
 export async function claimNextFallbackReserve(group) {
   const safeGroup = normalizeGroup(group);
   if (!safeGroup) throw new Error("Grupo de reserva inválido.");
@@ -419,18 +356,7 @@ export async function claimNextFallbackReserve(group) {
       limit: 10
     });
 
-    if (!listed.entries.length) {
-      if (safeGroup === "perfumes") {
-        const recycled = await recycleNextEligibleUsedPerfume();
-
-        if (recycled) {
-          // Recomeça a fila pelo perfume usado há mais tempo.
-          continue;
-        }
-      }
-
-      return null;
-    }
+    if (!listed.entries.length) return null;
 
     for (const entry of listed.entries) {
       const now = new Date().toISOString();

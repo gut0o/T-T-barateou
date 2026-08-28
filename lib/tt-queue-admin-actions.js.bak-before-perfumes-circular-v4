@@ -2,7 +2,6 @@ import {
   findQueuedPublicationByItemId,
   listPublicationQueue,
   markPublicationAffiliateReady,
-  queueCircularReservePublication,
   queuePendingPublications,
   repairPublicationQueueDuplicates,
   updatePublicationDeliveryState
@@ -1289,13 +1288,8 @@ export async function handleReserveMaterializeAction(req) {
       }
 
       const ready = plan.ready[0];
-
-      const queueOutcome =
-        group === "perfumes"
-          ? await queueCircularReservePublication(ready)
-          : (
-              await queuePendingPublications([ready])
-            ).results?.[0] || null;
+      const queueResult = await queuePendingPublications([ready]);
+      const queueOutcome = queueResult.results?.[0] || null;
 
       if (!queueOutcome || (queueOutcome.alreadyQueued === true && queueOutcome.requeued !== true)) {
         await updateFallbackReserveEntry({

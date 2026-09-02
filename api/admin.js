@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import {
   handleContinuousDiscoverAction,
+  handleIngestAffiliateLinksAction,
   handleQueueListAction,
   handleQueueSummaryAction,
   handleReserveAddAction,
@@ -394,6 +395,56 @@ async function reserveAdd(req) {
   };
 }
 
+
+async function productAdd(req) {
+  const body = bodyObject(req);
+  const links = normalizeLinks(body.affiliateLinks || body.links);
+
+  if (!links.length) {
+    const error = new Error("Envie pelo menos um link válido.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const batches = [];
+  for (let index = 0; index < links.length; index += 10) {
+    batches.push(links.slice(index, index + 10));
+  }
+
+  const results = [];
+
+  for (const batch of batches) {
+    results.push(
+      await handleIngestAffiliateLinksAction(
+        adminRequest(req, {
+          body: {
+            affiliateLinks: batch
+          }
+        })
+      )
+    );
+  }
+
+  return {
+    ok: true,
+    action: "product-add",
+    requestedCount: links.length,
+    readyCount: results.reduce(
+      (sum, item) => sum + Number(item.readyCount || 0),
+      0
+    ),
+    heldCount: results.reduce(
+      (sum, item) => sum + Number(item.heldCount || 0),
+      0
+    ),
+    failedCount: results.reduce(
+      (sum, item) => sum + Number(item.failedCount || 0),
+      0
+    ),
+    results: results.flatMap((item) => item.results || [])
+  };
+}
+
 function safeErrorMessage(error) {
   if (typeof error?.message === "string") return error.message;
   if (typeof error === "string") return error;
@@ -539,6 +590,15 @@ export default async function handler(req, res) {
         action,
         control
       });
+    }
+
+    if (action === "product-add") {
+      if (req.method !== "POST") {
+        return res.status(405).json({ ok: false, error: "Use POST." });
+      }
+
+      requireAdminSession(req);
+      return res.status(200).json(await productAdd(req));
     }
 
     if (action === "reserve-add") {

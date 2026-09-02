@@ -54,6 +54,8 @@ function applyRole(role){
   $("#viewerNotice").hidden=!viewer;
   $("#viewerPerfumeHint").hidden=!viewer;
   $("#perfumeForm").hidden=viewer;
+  $("#viewerProductHint").hidden=!viewer;
+  $("#productForm").hidden=viewer;
 
   $$(".adminOnly").forEach(el=>{
     el.disabled=viewer;
@@ -243,6 +245,61 @@ $$("[data-group]").forEach(b=>b.onclick=async()=>{
     b.disabled=false;
   }
 });
+
+
+$("#productForm").onsubmit=async e=>{
+  e.preventDefault();
+  if(state.role!=="admin")return;
+
+  const links=[...new Set(
+    $("#productLinks").value
+      .split(/\s+/)
+      .map(x=>x.trim())
+      .filter(x=>/^https?:\/\//i.test(x))
+  )].slice(0,20);
+
+  if(!links.length){
+    return msg("Cole pelo menos um link válido do Mercado Livre.","error");
+  }
+
+  const button=$("#productForm button");
+  button.disabled=true;
+  button.textContent="Processando...";
+
+  try{
+    const d=await api("product-add",{
+      method:"POST",
+      body:{affiliateLinks:links}
+    });
+
+    const detail=(d.results||[])
+      .filter(x=>x.status!=="ready_to_publish"&&x.status!=="held")
+      .map(x=>x.error||x.reason)
+      .filter(Boolean)[0];
+
+    if(d.failedCount){
+      msg(
+        `Produtos: ${d.readyCount||0} pronto(s), ${d.heldCount||0} retido(s), ${d.failedCount||0} falha(s).${detail?` Motivo: ${detail}`:""}`,
+        "error"
+      );
+    }else{
+      msg(
+        `Produtos: ${d.readyCount||0} pronto(s) para publicação e ${d.heldCount||0} retido(s) pelas regras.`
+      );
+    }
+
+    if((d.readyCount||0)+(d.heldCount||0)>0){
+      $("#productLinks").value="";
+    }
+
+    await refreshAll();
+  }catch(x){
+    msg(x.message,"error");
+  }finally{
+    button.disabled=false;
+    button.textContent="Adicionar à fila";
+  }
+};
 
 $("#perfumeForm").onsubmit=async e=>{
   e.preventDefault();

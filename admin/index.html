@@ -181,6 +181,48 @@
       </article>
     </section>
 
+
+    <section class="card perfume" id="manualProductsSection">
+      <div class="head">
+        <div>
+          <p class="eyebrow">PRODUTOS ESCOLHIDOS POR VOCÊ</p>
+          <h2>Adicionar produtos à fila</h2>
+          <p class="muted">
+            Cole links do Mercado Livre ou meli.la. O T&T identifica a categoria e prepara a oferta.
+            Eletrônicos e Fitness entram na fila normal. Perfumes continuam na reserva circular abaixo.
+          </p>
+        </div>
+      </div>
+
+      <div class="perfumeGrid">
+        <form id="productForm" class="adminOnlyBlock">
+          <label>Links dos produtos</label>
+          <textarea
+            id="productLinks"
+            rows="8"
+            placeholder="https://www.mercadolivre.com.br/...
+https://meli.la/..."
+          ></textarea>
+          <small class="muted">
+            Até 20 links por envio. Com modo automático ativo, as ofertas ficam disponíveis para os próximos ciclos.
+          </small>
+          <button class="primary">Adicionar à fila</button>
+        </form>
+
+        <div id="viewerProductHint" class="viewerPerfumeHint" hidden>
+          👁 No modo visualização, você pode acompanhar a fila, mas não adicionar produtos.
+        </div>
+
+        <div class="opItem">
+          <span>Como funciona</span>
+          <strong>1. Cole → 2. Valida → 3. Enfileira</strong>
+          <small>
+            O link é resolvido pelo backend, passa pelas regras atuais e só entra como pronto quando for válido.
+          </small>
+        </div>
+      </div>
+    </section>
+
     <section class="card perfume">
       <div class="head">
         <div>

@@ -1,17 +1,652 @@
 import crypto from "node:crypto";
-const COOKIE="tt_panel_session",TTL=12*60*60*1000;
-function env(n){const v=String(process.env[n]||"").trim();if(!v){const e=new Error(`Variável ${n} não configurada.`);e.statusCode=503;throw e}return v}
-function safe(a,b){a=Buffer.from(String(a||""));b=Buffer.from(String(b||""));return a.length===b.length&&crypto.timingSafeEqual(a,b)}
-function sig(p){return crypto.createHmac("sha256",env("TT_PANEL_SESSION_SECRET")).update(p).digest("base64url")}
-function token(){const p=Buffer.from(JSON.stringify({v:1,exp:Date.now()+TTL,n:crypto.randomBytes(12).toString("hex")})).toString("base64url");return `${p}.${sig(p)}`}
-function cookies(req){const o={};for(const p of String(req.headers?.cookie||"").split(";")){const i=p.indexOf("=");if(i>0)o[p.slice(0,i).trim()]=decodeURIComponent(p.slice(i+1).trim())}return o}
-function valid(req){const t=cookies(req)[COOKIE];if(!t)return false;const[p,s]=t.split(".");if(!p||!s||!safe(s,sig(p)))return false;try{const d=JSON.parse(Buffer.from(p,"base64url").toString("utf8"));return d.v===1&&Number(d.exp)>Date.now()}catch{return false}}
-function sameOrigin(req){const o=String(req.headers?.origin||"");if(!o)return;const proto=String(req.headers["x-forwarded-proto"]||"https").split(",")[0].trim(),host=String(req.headers.host||"").trim();if(o!==`${proto}://${host}`){const e=new Error("Origem inválida.");e.statusCode=403;throw e}}
-function base(req){const c=String(process.env.TT_PUBLIC_BASE_URL||"").trim().replace(/\/+$/,"");if(c)return /^https?:\/\//i.test(c)?c:`https://${c}`;const proto=String(req.headers["x-forwarded-proto"]||"https").split(",")[0].trim(),host=String(req.headers.host||"").trim();return `${proto}://${host}`}
-async function json(r){try{return await r.json()}catch{return null}}
-async function back(req,{action,method="GET",query={},body=null}){const u=new URL("/api/discover-bestsellers",base(req));u.searchParams.set("action",action);for(const[k,v]of Object.entries(query))if(v!==null&&v!==undefined&&v!=="")u.searchParams.set(k,String(v));const r=await fetch(u,{method,headers:{Accept:"application/json","Content-Type":"application/json","x-tt-admin-key":env("TT_QUEUE_ADMIN_KEY")},body:body===null?undefined:JSON.stringify(body)}),d=await json(r);if(!r.ok||d?.ok===false){const e=new Error(d?.error||d?.message||`Backend HTTP ${r.status}`);e.statusCode=r.status>=400?r.status:502;throw e}return d}
-async function ml(req){const r=await fetch(new URL("/api/ml-status",base(req)),{headers:{Accept:"application/json"}});return await json(r)||{connected:false}}
-function links(v){return [...new Set((Array.isArray(v)?v:String(v||"").split(/\s+/)).map(x=>String(x||"").trim()).filter(x=>/^https?:\/\//i.test(x)))].slice(0,20)}
-async function dashboard(req){const[summary,queue,mlStatus]=await Promise.all([back(req,{action:"queue-summary"}),back(req,{action:"queue-list",query:{limit:50}}),ml(req)]);let perfumeAvailableCount=0;try{const r=await back(req,{action:"reserve-list",query:{group:"perfumes",status:"available",limit:100}});perfumeAvailableCount=Array.isArray(r.reserve)?r.reserve.length:0}catch{}return{ok:true,summary,queue,mlStatus,perfumeAvailableCount}}
-async function reserveAdd(req){const b=typeof req.body==="string"?JSON.parse(req.body||"{}"):(req.body||{}),group=String(b.group||"").toLowerCase(),ls=links(b.affiliateLinks||b.links);if(!["eletronicos","fitness","perfumes"].includes(group)){const e=new Error("Grupo inválido.");e.statusCode=400;throw e}if(!ls.length){const e=new Error("Envie pelo menos um link.");e.statusCode=400;throw e}const out=[];for(let i=0;i<ls.length;i+=10)out.push(await back(req,{action:"reserve-add",method:"POST",body:{group,affiliateLinks:ls.slice(i,i+10)}}));return{ok:out.every(x=>x.allSucceeded!==false),group,requestedCount:ls.length,addedCount:out.reduce((s,x)=>s+Number(x.addedCount||0),0),duplicateCount:out.reduce((s,x)=>s+Number(x.duplicateCount||0),0),failedCount:out.reduce((s,x)=>s+Number(x.failedCount||0),0),results:out.flatMap(x=>x.results||[])}}
-export default async function handler(req,res){res.setHeader("Cache-Control","no-store, max-age=0");try{const a=String(req.query?.action||"").toLowerCase();if(a==="login"){if(req.method!=="POST")return res.status(405).json({ok:false,error:"Use POST."});sameOrigin(req);const b=typeof req.body==="string"?JSON.parse(req.body||"{}"):(req.body||{});if(!safe(b.password,env("TT_PANEL_PASSWORD")))return res.status(401).json({ok:false,error:"Senha incorreta."});res.setHeader("Set-Cookie",`${COOKIE}=${encodeURIComponent(token())}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${Math.floor(TTL/1000)}`);return res.status(200).json({ok:true,authenticated:true})}if(a==="logout"){sameOrigin(req);res.setHeader("Set-Cookie",`${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`);return res.status(200).json({ok:true})}if(a==="session")return valid(req)?res.status(200).json({ok:true,authenticated:true}):res.status(401).json({ok:false,error:"Sessão não autenticada."});if(!valid(req))return res.status(401).json({ok:false,error:"Sessão do painel inválida ou expirada."});if(req.method==="POST")sameOrigin(req);if(a==="dashboard")return res.status(200).json(await dashboard(req));if(a==="reserve-list")return res.status(200).json(await back(req,{action:"reserve-list",query:{group:"perfumes",status:req.query?.status||"available",limit:100}}));if(a==="reserve-add"){if(req.method!=="POST")return res.status(405).json({ok:false,error:"Use POST."});return res.status(200).json(await reserveAdd(req))}if(a==="reserve-remove"){if(req.method!=="POST")return res.status(405).json({ok:false,error:"Use POST."});const b=typeof req.body==="string"?JSON.parse(req.body||"{}"):(req.body||{}),id=Number(b.id);if(!Number.isInteger(id)||id<=0)return res.status(400).json({ok:false,error:"ID inválido."});return res.status(200).json(await back(req,{action:"reserve-remove",method:"POST",body:{id}}))}if(a==="discover"){if(req.method!=="POST")return res.status(405).json({ok:false,error:"Use POST."});const b=typeof req.body==="string"?JSON.parse(req.body||"{}"):(req.body||{}),group=String(b.group||"").toLowerCase();if(!["eletronicos","fitness"].includes(group))return res.status(400).json({ok:false,error:"Use eletronicos ou fitness."});return res.status(200).json(await back(req,{action:"continuous-discover",method:"POST",body:{group}}))}return res.status(404).json({ok:false,error:"Ação não encontrada."})}catch(e){return res.status(e?.statusCode||500).json({ok:false,error:e?.message||"Erro inesperado."})}}
+
+import {
+  handleContinuousDiscoverAction,
+  handleQueueListAction,
+  handleQueueSummaryAction,
+  handleReserveAddAction,
+  handleReserveListAction,
+  handleReserveRemoveAction
+} from "../lib/tt-queue-admin-actions.js";
+
+import {
+  getMlTokenStatus
+} from "../lib/ml-token-store.js";
+
+const COOKIE_NAME = "tt_panel_session";
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+
+function requiredEnv(name) {
+  const value = String(process.env[name] || "").trim();
+
+  if (!value) {
+    const error = new Error(`Variável ${name} não configurada.`);
+    error.statusCode = 503;
+    throw error;
+  }
+
+  return value;
+}
+
+function timingSafeTextEqual(left, right) {
+  const a = Buffer.from(String(left || ""));
+  const b = Buffer.from(String(right || ""));
+
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(a, b);
+}
+
+function sessionSignature(payload) {
+  return crypto
+    .createHmac(
+      "sha256",
+      requiredEnv("TT_PANEL_SESSION_SECRET")
+    )
+    .update(payload)
+    .digest("base64url");
+}
+
+function createSessionToken() {
+  const payload = Buffer
+    .from(
+      JSON.stringify({
+        v: 1,
+        exp: Date.now() + SESSION_TTL_MS,
+        nonce: crypto.randomBytes(12).toString("hex")
+      })
+    )
+    .toString("base64url");
+
+  return `${payload}.${sessionSignature(payload)}`;
+}
+
+function readCookies(req) {
+  const cookies = {};
+  const raw = String(req.headers?.cookie || "");
+
+  for (const part of raw.split(";")) {
+    const separator = part.indexOf("=");
+
+    if (separator <= 0) {
+      continue;
+    }
+
+    const key = part.slice(0, separator).trim();
+    const value = part.slice(separator + 1).trim();
+
+    if (key) {
+      cookies[key] = decodeURIComponent(value);
+    }
+  }
+
+  return cookies;
+}
+
+function sessionIsValid(req) {
+  const token = readCookies(req)[COOKIE_NAME];
+
+  if (!token) {
+    return false;
+  }
+
+  const [payload, signature] = token.split(".");
+
+  if (
+    !payload ||
+    !signature ||
+    !timingSafeTextEqual(
+      signature,
+      sessionSignature(payload)
+    )
+  ) {
+    return false;
+  }
+
+  try {
+    const decoded = JSON.parse(
+      Buffer
+        .from(payload, "base64url")
+        .toString("utf8")
+    );
+
+    return (
+      decoded?.v === 1 &&
+      Number(decoded?.exp) > Date.now()
+    );
+  } catch {
+    return false;
+  }
+}
+
+function setSessionCookie(res, token) {
+  res.setHeader(
+    "Set-Cookie",
+    `${COOKIE_NAME}=${encodeURIComponent(token)}; ` +
+      "Path=/; HttpOnly; Secure; SameSite=Strict; " +
+      `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`
+  );
+}
+
+function clearSessionCookie(res) {
+  res.setHeader(
+    "Set-Cookie",
+    `${COOKIE_NAME}=; Path=/; HttpOnly; Secure; ` +
+      "SameSite=Strict; Max-Age=0"
+  );
+}
+
+function assertSession(req) {
+  if (!sessionIsValid(req)) {
+    const error = new Error(
+      "Sessão do painel inválida ou expirada."
+    );
+
+    error.statusCode = 401;
+    throw error;
+  }
+}
+
+function assertSameOrigin(req) {
+  const origin = String(
+    req.headers?.origin || ""
+  ).trim();
+
+  if (!origin) {
+    return;
+  }
+
+  const proto = String(
+    req.headers?.["x-forwarded-proto"] || "https"
+  )
+    .split(",")[0]
+    .trim();
+
+  const host = String(
+    req.headers?.host || ""
+  ).trim();
+
+  if (origin !== `${proto}://${host}`) {
+    const error = new Error("Origem inválida.");
+    error.statusCode = 403;
+    throw error;
+  }
+}
+
+function bodyObject(req) {
+  if (typeof req.body === "string") {
+    return JSON.parse(req.body || "{}");
+  }
+
+  return req.body || {};
+}
+
+/*
+ * O painel NÃO faz mais HTTP para queue-summary/queue-list.
+ *
+ * Ele chama as mesmas actions do T&T diretamente dentro da Function
+ * do Preview. Assim:
+ * - a sessão do painel continua isolada;
+ * - TT_QUEUE_ADMIN_KEY continua só no servidor;
+ * - evitamos 401 causado por proxy/Preview/Production;
+ * - o grupo do WhatsApp e o publisher não mudam.
+ */
+function adminRequest(
+  req,
+  {
+    query = {},
+    body = {}
+  } = {}
+) {
+  return {
+    method: req.method,
+    headers: {
+      ...(req.headers || {}),
+      "x-tt-admin-key":
+        requiredEnv("TT_QUEUE_ADMIN_KEY")
+    },
+    query,
+    body
+  };
+}
+
+async function dashboard(req) {
+  const [
+    summary,
+    queue,
+    mlStatus
+  ] = await Promise.all([
+    handleQueueSummaryAction(
+      adminRequest(req, {
+        query: {}
+      })
+    ),
+
+    handleQueueListAction(
+      adminRequest(req, {
+        query: {
+          limit: 50
+        }
+      })
+    ),
+
+    getMlTokenStatus()
+      .then((status) => ({
+        ok: true,
+        ...status
+      }))
+      .catch((error) => ({
+        ok: false,
+        connected: false,
+        message:
+          error?.message ||
+          "Não consegui consultar o Mercado Livre."
+      }))
+  ]);
+
+  let perfumeAvailableCount = 0;
+
+  try {
+    const reserve = await handleReserveListAction(
+      adminRequest(req, {
+        query: {
+          group: "perfumes",
+          status: "available",
+          limit: 100
+        }
+      })
+    );
+
+    perfumeAvailableCount =
+      Array.isArray(reserve?.reserve)
+        ? reserve.reserve.length
+        : 0;
+  } catch {
+    perfumeAvailableCount = 0;
+  }
+
+  return {
+    ok: true,
+    action: "dashboard",
+    summary,
+    queue,
+    mlStatus,
+    perfumeAvailableCount
+  };
+}
+
+function normalizeLinks(raw) {
+  const values =
+    Array.isArray(raw)
+      ? raw
+      : String(raw || "")
+          .split(/\s+/);
+
+  return Array.from(
+    new Set(
+      values
+        .map((value) =>
+          String(value || "").trim()
+        )
+        .filter((value) =>
+          /^https?:\/\//i.test(value)
+        )
+    )
+  ).slice(0, 20);
+}
+
+async function reserveAdd(req) {
+  const body = bodyObject(req);
+
+  const group = String(
+    body.group || ""
+  )
+    .trim()
+    .toLowerCase();
+
+  if (
+    ![
+      "eletronicos",
+      "fitness",
+      "perfumes"
+    ].includes(group)
+  ) {
+    const error = new Error("Grupo inválido.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const links = normalizeLinks(
+    body.affiliateLinks ||
+    body.links
+  );
+
+  if (!links.length) {
+    const error = new Error(
+      "Envie pelo menos um link válido."
+    );
+
+    error.statusCode = 400;
+    throw error;
+  }
+
+  /*
+   * O backend atual aceita 10 links por chamada.
+   * O painel aceita 20 e divide em dois lotes.
+   */
+  const batches = [];
+
+  for (
+    let index = 0;
+    index < links.length;
+    index += 10
+  ) {
+    batches.push(
+      links.slice(index, index + 10)
+    );
+  }
+
+  const results = [];
+
+  for (const batch of batches) {
+    const result =
+      await handleReserveAddAction(
+        adminRequest(req, {
+          body: {
+            group,
+            affiliateLinks: batch
+          }
+        })
+      );
+
+    results.push(result);
+  }
+
+  return {
+    ok:
+      results.every(
+        (item) =>
+          item.allSucceeded !== false
+      ),
+
+    action: "reserve-add",
+    group,
+    requestedCount: links.length,
+
+    addedCount:
+      results.reduce(
+        (sum, item) =>
+          sum +
+          Number(item.addedCount || 0),
+        0
+      ),
+
+    duplicateCount:
+      results.reduce(
+        (sum, item) =>
+          sum +
+          Number(item.duplicateCount || 0),
+        0
+      ),
+
+    failedCount:
+      results.reduce(
+        (sum, item) =>
+          sum +
+          Number(item.failedCount || 0),
+        0
+      ),
+
+    results:
+      results.flatMap(
+        (item) =>
+          item.results || []
+      )
+  };
+}
+
+function safeErrorMessage(error) {
+  if (typeof error?.message === "string") {
+    return error.message;
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return "Erro inesperado no painel.";
+  }
+}
+
+export default async function handler(
+  req,
+  res
+) {
+  res.setHeader(
+    "Cache-Control",
+    "no-store, max-age=0"
+  );
+
+  res.setHeader(
+    "X-Content-Type-Options",
+    "nosniff"
+  );
+
+  try {
+    const action = String(
+      req.query?.action || ""
+    )
+      .trim()
+      .toLowerCase();
+
+    if (action === "login") {
+      if (req.method !== "POST") {
+        return res.status(405).json({
+          ok: false,
+          error: "Use POST."
+        });
+      }
+
+      assertSameOrigin(req);
+
+      const body = bodyObject(req);
+
+      if (
+        !timingSafeTextEqual(
+          body.password,
+          requiredEnv("TT_PANEL_PASSWORD")
+        )
+      ) {
+        return res.status(401).json({
+          ok: false,
+          error: "Senha incorreta."
+        });
+      }
+
+      setSessionCookie(
+        res,
+        createSessionToken()
+      );
+
+      return res.status(200).json({
+        ok: true,
+        authenticated: true
+      });
+    }
+
+    if (action === "logout") {
+      assertSameOrigin(req);
+      clearSessionCookie(res);
+
+      return res.status(200).json({
+        ok: true,
+        authenticated: false
+      });
+    }
+
+    if (action === "session") {
+      if (!sessionIsValid(req)) {
+        return res.status(401).json({
+          ok: false,
+          authenticated: false,
+          error:
+            "Sessão não autenticada."
+        });
+      }
+
+      return res.status(200).json({
+        ok: true,
+        authenticated: true
+      });
+    }
+
+    assertSession(req);
+
+    if (req.method === "POST") {
+      assertSameOrigin(req);
+    }
+
+    if (action === "dashboard") {
+      return res
+        .status(200)
+        .json(
+          await dashboard(req)
+        );
+    }
+
+    if (action === "reserve-list") {
+      const status = String(
+        req.query?.status ||
+        "available"
+      )
+        .trim()
+        .toLowerCase();
+
+      const result =
+        await handleReserveListAction(
+          adminRequest(req, {
+            query: {
+              group: "perfumes",
+              status,
+              limit: 100
+            }
+          })
+        );
+
+      return res
+        .status(200)
+        .json(result);
+    }
+
+    if (action === "reserve-add") {
+      if (req.method !== "POST") {
+        return res.status(405).json({
+          ok: false,
+          error: "Use POST."
+        });
+      }
+
+      return res
+        .status(200)
+        .json(
+          await reserveAdd(req)
+        );
+    }
+
+    if (action === "reserve-remove") {
+      if (req.method !== "POST") {
+        return res.status(405).json({
+          ok: false,
+          error: "Use POST."
+        });
+      }
+
+      const body = bodyObject(req);
+      const id = Number(body.id);
+
+      if (
+        !Number.isInteger(id) ||
+        id <= 0
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error: "ID inválido."
+        });
+      }
+
+      const result =
+        await handleReserveRemoveAction(
+          adminRequest(req, {
+            body: { id }
+          })
+        );
+
+      return res
+        .status(200)
+        .json(result);
+    }
+
+    if (action === "discover") {
+      if (req.method !== "POST") {
+        return res.status(405).json({
+          ok: false,
+          error: "Use POST."
+        });
+      }
+
+      const body = bodyObject(req);
+
+      const group = String(
+        body.group || ""
+      )
+        .trim()
+        .toLowerCase();
+
+      if (
+        ![
+          "eletronicos",
+          "fitness"
+        ].includes(group)
+      ) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            "Use eletronicos ou fitness."
+        });
+      }
+
+      const result =
+        await handleContinuousDiscoverAction(
+          adminRequest(req, {
+            body: { group },
+            query: {}
+          })
+        );
+
+      return res
+        .status(200)
+        .json(result);
+    }
+
+    return res.status(404).json({
+      ok: false,
+      error:
+        "Ação administrativa não encontrada."
+    });
+  } catch (error) {
+    return res
+      .status(
+        error?.statusCode || 500
+      )
+      .json({
+        ok: false,
+        error:
+          safeErrorMessage(error)
+      });
+  }
+}

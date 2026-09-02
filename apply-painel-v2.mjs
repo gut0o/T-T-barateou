@@ -44,7 +44,7 @@ insertBefore(
 const PUBLISHER_CONTROL_API =
   (
     process.env.TT_PUBLISHER_CONTROL_API ||
-    new URL("/api/publisher-control", API_BASE).toString()
+    new URL("/api/app-state?mode=publisher", API_BASE).toString()
   ).trim();
 
 const PUBLISHER_CONTROL_POLL_MS =

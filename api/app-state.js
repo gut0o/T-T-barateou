@@ -1,5 +1,12 @@
 import crypto from "node:crypto";
 
+import {
+  readPublisherControlState,
+  readPublisherRuntimeState,
+  writePublisherControlState,
+  writePublisherRuntimeState
+} from "../lib/tt-publisher-control-store.js";
+
 const STATE_KEY = "publisher_group_cursors";
 
 function requiredEnv(name) {
@@ -59,6 +66,14 @@ function cleanState(value) {
     fitness: cleanCursor(value?.fitness),
     perfumes: cleanCursor(value?.perfumes)
   };
+}
+
+function bodyObject(req) {
+  if (typeof req.body === "string") {
+    return JSON.parse(req.body || "{}");
+  }
+
+  return req.body || {};
 }
 
 async function supabaseRequest(
@@ -157,9 +172,75 @@ async function writeState(value) {
   return state;
 }
 
+async function handlePublisherMode(req, res) {
+  if (req.method === "GET") {
+    const [control, runtime] = await Promise.all([
+      readPublisherControlState(),
+      readPublisherRuntimeState()
+    ]);
+
+    return res.status(200).json({
+      ok: true,
+      mode: "publisher",
+      control,
+      runtime
+    });
+  }
+
+  if (req.method === "POST") {
+    const body = bodyObject(req);
+    const action = String(body.action || "").trim().toLowerCase();
+
+    if (action === "control") {
+      const control = await writePublisherControlState({
+        manualModeEnabled: body.manualModeEnabled === true,
+        source: body.source || "api"
+      });
+
+      return res.status(200).json({
+        ok: true,
+        mode: "publisher",
+        action,
+        control
+      });
+    }
+
+    if (action === "heartbeat") {
+      const runtime = await writePublisherRuntimeState(
+        body.runtime || {}
+      );
+
+      return res.status(200).json({
+        ok: true,
+        mode: "publisher",
+        action,
+        runtime
+      });
+    }
+
+    return res.status(400).json({
+      ok: false,
+      error: "Ação inválida. Use control ou heartbeat."
+    });
+  }
+
+  return res.status(405).json({
+    ok: false,
+    error: "Method not allowed."
+  });
+}
+
 export default async function handler(req, res) {
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+
   try {
     requireAdmin(req);
+
+    const mode = String(req.query?.mode || "").trim().toLowerCase();
+
+    if (mode === "publisher") {
+      return handlePublisherMode(req, res);
+    }
 
     if (req.method === "GET") {
       const state = await readState();
@@ -173,7 +254,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "POST") {
-      const state = await writeState(req.body?.state);
+      const state = await writeState(bodyObject(req).state);
 
       return res.status(200).json({
         ok: true,

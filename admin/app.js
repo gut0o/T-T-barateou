@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
-const state={queue:[],reserve:[],reserveStatus:"available",role:null,publisher:null};
+const state={queue:[],reserve:[],reserveStatus:"available",role:null,publisher:null,productResults:[]};
 const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
 const money=v=>typeof v==="number"?new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v):"—";
 const labels={awaiting_affiliate_link:"Aguardando afiliado",ready_to_publish:"Pronta",sending:"Enviando",sent:"Enviada",send_error:"Erro",rejected:"Rejeitada",available:"Disponível",claimed:"Em validação",queued:"Na fila",used:"Usado",expired:"Expirado",duplicate:"Duplicado",removed:"Removido"};
@@ -71,6 +71,83 @@ function renderQueue(){
     const d=x.data||x.envelope?.data||x;
     return `<div class="row">${d.image?`<img class="thumb" src="${esc(d.image)}" alt="">`:`<div class="thumb"></div>`}<div class="main"><b>${esc(d.title||x.title||"Oferta")}</b><div class="meta">${esc(d.ttCategoryName||x.ttCategoryName||"Sem categoria")} · ${esc(d.itemId||x.itemId||"")}</div></div><div class="side">${money(d.price??x.price)}<br><span class="badge ${esc(x.status)}">${esc(labels[x.status]||x.status||"—")}</span></div></div>`;
   }).join(""):`<div class="empty">Nenhuma oferta neste filtro.</div>`;
+}
+
+
+function renderProductResults(){
+  const container=$("#productResults");
+  if(!container)return;
+
+  const results=Array.isArray(state.productResults)?state.productResults:[];
+
+  if(!results.length){
+    container.innerHTML=`<div class="empty">Adicione um produto para ver aqui se ele entrou na fila, foi retido ou falhou.</div>`;
+    return;
+  }
+
+  container.innerHTML=results.map(x=>{
+    const status=x.status||"unknown";
+    const statusLabel=
+      status==="ready_to_publish"?"ENTROU NA FILA":
+      status==="held"?"RETIDO":
+      status==="resolution_failed"?"FALHA AO ABRIR":
+      status==="error"?"ERRO":
+      status;
+
+    const klass=
+      status==="ready_to_publish"?"ready_to_publish":
+      status==="held"?"queued":
+      "send_error";
+
+    const detail=
+      x.error||
+      x.reason||
+      x.heldReason||
+      (
+        status==="ready_to_publish"
+          ?"Produto validado e disponível para publicação."
+          :""
+      );
+
+    return `<div class="row">
+      <div class="thumb"></div>
+      <div class="main">
+        <b>${esc(x.title||x.itemId||x.affiliateLink||"Produto")}</b>
+        <div class="meta">
+          ${esc(x.itemId||"")}
+          ${detail?` · ${esc(detail)}`:""}
+        </div>
+      </div>
+      <div class="side">
+        ${money(x.price)}
+        <br>
+        <span class="badge ${klass}">${esc(statusLabel)}</span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function saveProductResults(results){
+  state.productResults=Array.isArray(results)?results:[];
+  try{
+    sessionStorage.setItem(
+      "tt_panel_product_results_v1",
+      JSON.stringify(state.productResults)
+    );
+  }catch{}
+  renderProductResults();
+}
+
+function restoreProductResults(){
+  try{
+    const stored=JSON.parse(
+      sessionStorage.getItem("tt_panel_product_results_v1")||"[]"
+    );
+    state.productResults=Array.isArray(stored)?stored:[];
+  }catch{
+    state.productResults=[];
+  }
+  renderProductResults();
 }
 
 function reserveImage(x){
@@ -272,6 +349,8 @@ $("#productForm").onsubmit=async e=>{
       body:{affiliateLinks:links}
     });
 
+    saveProductResults(d.results||[]);
+
     const detail=(d.results||[])
       .filter(x=>x.status!=="ready_to_publish"&&x.status!=="held")
       .map(x=>x.error||x.reason)
@@ -299,6 +378,10 @@ $("#productForm").onsubmit=async e=>{
     button.disabled=false;
     button.textContent="Adicionar à fila";
   }
+};
+
+$("#clearProductResults").onclick=()=>{
+  saveProductResults([]);
 };
 
 $("#perfumeForm").onsubmit=async e=>{
@@ -346,6 +429,8 @@ $$(".tab").forEach(t=>t.onclick=async()=>{
 });
 
 (async()=>{
+  restoreProductResults();
+
   try{
     const session=await api("session");
     applyRole(session.role);

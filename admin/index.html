@@ -213,12 +213,20 @@ https://meli.la/..."
           👁 No modo visualização, você pode acompanhar a fila, mas não adicionar produtos.
         </div>
 
-        <div class="opItem">
-          <span>Como funciona</span>
-          <strong>1. Cole → 2. Valida → 3. Enfileira</strong>
-          <small>
-            O link é resolvido pelo backend, passa pelas regras atuais e só entra como pronto quando for válido.
-          </small>
+        <div>
+          <div class="head productResultHead">
+            <div>
+              <span class="muted small">RESULTADO DO ÚLTIMO ENVIO</span>
+              <h3 style="margin:6px 0 0">Produtos processados</h3>
+            </div>
+            <button id="clearProductResults" type="button">Limpar</button>
+          </div>
+
+          <div id="productResults" class="list">
+            <div class="empty">
+              Adicione um produto para ver aqui se ele entrou na fila, foi retido ou falhou.
+            </div>
+          </div>
         </div>
       </div>
     </section>

@@ -1,0 +1,24 @@
+T&T BARATEOU — PAINEL V2.2 — RESULTADO DOS PRODUTOS
+
+Este patch corrige a falta de feedback visual ao adicionar produtos.
+
+Agora, logo ao lado do formulário, aparece:
+- ENTROU NA FILA
+- RETIDO
+- FALHA AO ABRIR
+- ERRO
+
+Também mostra:
+- título
+- itemId
+- preço
+- motivo quando houver erro/retenção
+
+O último resultado fica salvo na sessão do navegador para não sumir ao atualizar a página.
+
+INSTALAÇÃO
+1. Extraia este ZIP na raiz do projeto.
+2. Rode:
+   node apply-produtos-v2-2.mjs
+3. Depois:
+   git status

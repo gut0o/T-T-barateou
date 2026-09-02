@@ -1,0 +1,39 @@
+T&T BARATEOU — PAINEL WEB V1
+
+Novos arquivos:
+- admin/index.html
+- admin/styles.css
+- admin/app.js
+- api/admin.js
+
+Não altera o grupo de controle, WhatsApp, regras de dedupe, Perfumes ou geração de afiliado.
+
+V1:
+- login server-side;
+- TT_QUEUE_ADMIN_KEY nunca é exposta ao navegador;
+- resumo + fila;
+- status OAuth Mercado Livre;
+- descoberta manual Eletrônicos/Fitness;
+- adicionar/listar/remover reserva de Perfumes;
+- até 20 links por envio (backend divide em lotes de 10).
+
+NOVAS VARIÁVEIS NA VERCEL:
+TT_PANEL_PASSWORD
+TT_PANEL_SESSION_SECRET
+
+Gere TT_PANEL_SESSION_SECRET localmente:
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+
+Não envie os valores para GitHub/chat.
+
+Instalação na branch painel-web-v1:
+1) Extraia o ZIP na raiz do projeto.
+2) node --check api/admin.js
+3) git status
+4) git add admin api/admin.js
+5) git commit -m "Adiciona painel web administrativo v1"
+6) git push -u origin painel-web-v1
+7) Configure as duas variáveis no Vercel.
+8) Teste o preview antes de mergear.
+
+Painel: /admin/

@@ -11,22 +11,36 @@ import {
 
 import { getMlTokenStatus } from "../lib/ml-token-store.js";
 
+import {
+  readPublisherControlState,
+  readPublisherRuntimeState,
+  writePublisherControlState
+} from "../lib/tt-publisher-control-store.js";
+
 const COOKIE_NAME = "tt_panel_session";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const PUBLISHER_ONLINE_MAX_AGE_MS = 90 * 1000;
 
 function requiredEnv(name) {
   const value = String(process.env[name] || "").trim();
+
   if (!value) {
     const error = new Error(`Variável ${name} não configurada.`);
     error.statusCode = 503;
     throw error;
   }
+
   return value;
+}
+
+function optionalEnv(name) {
+  return String(process.env[name] || "").trim();
 }
 
 function timingSafeTextEqual(left, right) {
   const a = Buffer.from(String(left || ""));
   const b = Buffer.from(String(right || ""));
+
   if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(a, b);
 }
@@ -38,42 +52,67 @@ function sessionSignature(payload) {
     .digest("base64url");
 }
 
-function createSessionToken() {
-  const payload = Buffer.from(JSON.stringify({
-    v: 1,
-    exp: Date.now() + SESSION_TTL_MS,
-    nonce: crypto.randomBytes(12).toString("hex")
-  })).toString("base64url");
+function createSessionToken(role) {
+  const payload = Buffer.from(
+    JSON.stringify({
+      v: 2,
+      role,
+      exp: Date.now() + SESSION_TTL_MS,
+      nonce: crypto.randomBytes(12).toString("hex")
+    })
+  ).toString("base64url");
 
   return `${payload}.${sessionSignature(payload)}`;
 }
 
 function readCookies(req) {
   const cookies = {};
+
   for (const part of String(req.headers?.cookie || "").split(";")) {
     const separator = part.indexOf("=");
     if (separator <= 0) continue;
+
     const key = part.slice(0, separator).trim();
     const value = part.slice(separator + 1).trim();
+
     if (key) cookies[key] = decodeURIComponent(value);
   }
+
   return cookies;
 }
 
-function sessionIsValid(req) {
+function sessionInfo(req) {
   const token = readCookies(req)[COOKIE_NAME];
-  if (!token) return false;
+  if (!token) return null;
 
   const [payload, signature] = token.split(".");
-  if (!payload || !signature || !timingSafeTextEqual(signature, sessionSignature(payload))) {
-    return false;
+  if (
+    !payload ||
+    !signature ||
+    !timingSafeTextEqual(signature, sessionSignature(payload))
+  ) {
+    return null;
   }
 
   try {
-    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    return decoded?.v === 1 && Number(decoded?.exp) > Date.now();
+    const decoded = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf8")
+    );
+
+    if (
+      decoded?.v !== 2 ||
+      !["admin", "viewer"].includes(decoded?.role) ||
+      Number(decoded?.exp) <= Date.now()
+    ) {
+      return null;
+    }
+
+    return {
+      role: decoded.role,
+      expiresAt: new Date(Number(decoded.exp)).toISOString()
+    };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -91,12 +130,28 @@ function clearSessionCookie(res) {
   );
 }
 
-function assertSession(req) {
-  if (!sessionIsValid(req)) {
+function requireSession(req) {
+  const session = sessionInfo(req);
+
+  if (!session) {
     const error = new Error("Sessão do painel inválida ou expirada.");
     error.statusCode = 401;
     throw error;
   }
+
+  return session;
+}
+
+function requireAdminSession(req) {
+  const session = requireSession(req);
+
+  if (session.role !== "admin") {
+    const error = new Error("Acesso somente para administrador.");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  return session;
 }
 
 function assertSameOrigin(req) {
@@ -106,6 +161,7 @@ function assertSameOrigin(req) {
   const proto = String(req.headers?.["x-forwarded-proto"] || "https")
     .split(",")[0]
     .trim();
+
   const host = String(req.headers?.host || "").trim();
 
   if (origin !== `${proto}://${host}`) {
@@ -135,34 +191,97 @@ function adminRequest(req, { query = {}, body = {} } = {}) {
 }
 
 function reserveEntries(result) {
-  const reserve = result?.reserve;
-
-  if (Array.isArray(reserve)) {
-    return reserve;
-  }
-
-  if (Array.isArray(reserve?.entries)) {
-    return reserve.entries;
-  }
-
+  if (Array.isArray(result?.reserve)) return result.reserve;
+  if (Array.isArray(result?.reserve?.entries)) return result.reserve.entries;
   return [];
 }
 
-async function dashboard(req) {
-  const [summary, queue, mlStatus] = await Promise.all([
-    handleQueueSummaryAction(
-      adminRequest(req, { query: {} })
-    ),
-    handleQueueListAction(
-      adminRequest(req, { query: { limit: 50 } })
-    ),
+function publisherView(control, runtime) {
+  const heartbeatAt = runtime?.heartbeatAt || null;
+  const heartbeatTime = heartbeatAt ? Date.parse(heartbeatAt) : NaN;
+
+  const online =
+    Number.isFinite(heartbeatTime) &&
+    Date.now() - heartbeatTime <= PUBLISHER_ONLINE_MAX_AGE_MS;
+
+  return {
+    online,
+    heartbeatAt,
+    whatsappConnected: online && runtime?.whatsappConnected === true,
+    manualModeEnabled:
+      typeof runtime?.manualModeEnabled === "boolean"
+        ? runtime.manualModeEnabled
+        : control?.manualModeEnabled === true,
+    requestedManualModeEnabled: control?.manualModeEnabled === true,
+    controlSource: control?.source || null,
+    controlUpdatedAt: control?.updatedAt || null,
+    automaticWindowOpen: runtime?.automaticWindowOpen === true,
+    automaticBatchInProgress: runtime?.automaticBatchInProgress === true,
+    autoBatchEnabled: runtime?.autoBatchEnabled !== false,
+    autoDiscoveryEnabled: runtime?.autoDiscoveryEnabled !== false,
+    affiliateConfigured: runtime?.affiliateConfigured === true,
+    affiliateBlocked: runtime?.affiliateBlocked === true,
+    testMode: runtime?.testMode === true,
+    sendWindow: runtime?.sendWindow || "09:00–22:00 (America/Sao_Paulo)",
+    timezone: runtime?.timezone || "America/Sao_Paulo",
+    currentClock: runtime?.currentClock || null,
+    publisherVersion: runtime?.publisherVersion || null
+  };
+}
+
+async function exactQueueCount() {
+  try {
+    const url = requiredEnv("SUPABASE_URL").replace(/\/+$/, "");
+    const secret = requiredEnv("SUPABASE_SECRET_KEY");
+
+    const response = await fetch(
+      `${url}/rest/v1/tt_publication_queue?select=id&limit=1`,
+      {
+        headers: {
+          Accept: "application/json",
+          apikey: secret,
+          Authorization: `Bearer ${secret}`,
+          Prefer: "count=exact",
+          Range: "0-0"
+        }
+      }
+    );
+
+    if (!response.ok) return null;
+
+    const contentRange = String(
+      response.headers.get("content-range") || ""
+    );
+
+    const total = Number(contentRange.split("/")[1]);
+
+    return Number.isFinite(total) ? total : null;
+  } catch {
+    return null;
+  }
+}
+
+async function dashboard(req, role) {
+  const [
+    summary,
+    queue,
+    mlStatus,
+    control,
+    runtime,
+    queueTotalExact
+  ] = await Promise.all([
+    handleQueueSummaryAction(adminRequest(req, { query: {} })),
+    handleQueueListAction(adminRequest(req, { query: { limit: 100 } })),
     getMlTokenStatus()
       .then((status) => ({ ok: true, ...status }))
       .catch((error) => ({
         ok: false,
         connected: false,
         message: error?.message || "Não consegui consultar o Mercado Livre."
-      }))
+      })),
+    readPublisherControlState(),
+    readPublisherRuntimeState(),
+    exactQueueCount()
   ]);
 
   let perfumeAvailableCount = 0;
@@ -186,10 +305,13 @@ async function dashboard(req) {
   return {
     ok: true,
     action: "dashboard",
+    role,
     summary,
     queue,
+    queueTotalExact,
     mlStatus,
-    perfumeAvailableCount
+    perfumeAvailableCount,
+    publisher: publisherView(control, runtime)
   };
 }
 
@@ -198,11 +320,13 @@ function normalizeLinks(raw) {
     ? raw
     : String(raw || "").split(/\s+/);
 
-  return Array.from(new Set(
-    values
-      .map((value) => String(value || "").trim())
-      .filter((value) => /^https?:\/\//i.test(value))
-  )).slice(0, 20);
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value || "").trim())
+        .filter((value) => /^https?:\/\//i.test(value))
+    )
+  ).slice(0, 20);
 }
 
 async function reserveAdd(req) {
@@ -231,25 +355,32 @@ async function reserveAdd(req) {
   const results = [];
 
   for (const batch of batches) {
-    const batchResult = await handleReserveAddAction(
-      adminRequest(req, {
-        body: {
-          group,
-          affiliateLinks: batch
-        }
-      })
+    results.push(
+      await handleReserveAddAction(
+        adminRequest(req, {
+          body: {
+            group,
+            affiliateLinks: batch
+          }
+        })
+      )
     );
-
-    results.push(batchResult);
   }
 
   const flatResults = results.flatMap((item) => item.results || []);
-  const addedCount = results.reduce((sum, item) => sum + Number(item.addedCount || 0), 0);
-  const duplicateCount = results.reduce((sum, item) => sum + Number(item.duplicateCount || 0), 0);
-  const failedCount = results.reduce((sum, item) => sum + Number(item.failedCount || 0), 0);
+  const addedCount = results.reduce(
+    (sum, item) => sum + Number(item.addedCount || 0),
+    0
+  );
+  const duplicateCount = results.reduce(
+    (sum, item) => sum + Number(item.duplicateCount || 0),
+    0
+  );
+  const failedCount = results.reduce(
+    (sum, item) => sum + Number(item.failedCount || 0),
+    0
+  );
 
-  // HTTP/API funcionou mesmo quando um link individual falhou.
-  // Assim o frontend consegue mostrar a causa real em vez de "Erro HTTP 200".
   return {
     ok: true,
     operationOk: failedCount === 0,
@@ -287,24 +418,53 @@ export default async function handler(req, res) {
       }
 
       assertSameOrigin(req);
-      const body = bodyObject(req);
 
-      if (!timingSafeTextEqual(body.password, requiredEnv("TT_PANEL_PASSWORD"))) {
-        return res.status(401).json({ ok: false, error: "Senha incorreta." });
+      const body = bodyObject(req);
+      const received = String(body.password || "");
+      const adminPassword = requiredEnv("TT_PANEL_PASSWORD");
+      const viewerPassword = optionalEnv("TT_PANEL_VIEW_PASSWORD");
+
+      let role = null;
+
+      if (timingSafeTextEqual(received, adminPassword)) {
+        role = "admin";
+      } else if (
+        viewerPassword &&
+        timingSafeTextEqual(received, viewerPassword)
+      ) {
+        role = "viewer";
       }
 
-      setSessionCookie(res, createSessionToken());
-      return res.status(200).json({ ok: true, authenticated: true });
+      if (!role) {
+        return res.status(401).json({
+          ok: false,
+          error: "Senha incorreta."
+        });
+      }
+
+      setSessionCookie(res, createSessionToken(role));
+
+      return res.status(200).json({
+        ok: true,
+        authenticated: true,
+        role
+      });
     }
 
     if (action === "logout") {
       assertSameOrigin(req);
       clearSessionCookie(res);
-      return res.status(200).json({ ok: true, authenticated: false });
+
+      return res.status(200).json({
+        ok: true,
+        authenticated: false
+      });
     }
 
     if (action === "session") {
-      if (!sessionIsValid(req)) {
+      const session = sessionInfo(req);
+
+      if (!session) {
         return res.status(401).json({
           ok: false,
           authenticated: false,
@@ -312,21 +472,30 @@ export default async function handler(req, res) {
         });
       }
 
-      return res.status(200).json({ ok: true, authenticated: true });
+      return res.status(200).json({
+        ok: true,
+        authenticated: true,
+        role: session.role,
+        expiresAt: session.expiresAt
+      });
     }
 
-    assertSession(req);
+    const session = requireSession(req);
 
     if (req.method === "POST") {
       assertSameOrigin(req);
     }
 
     if (action === "dashboard") {
-      return res.status(200).json(await dashboard(req));
+      return res.status(200).json(
+        await dashboard(req, session.role)
+      );
     }
 
     if (action === "reserve-list") {
-      const status = String(req.query?.status || "available").trim().toLowerCase();
+      const status = String(
+        req.query?.status || "available"
+      ).trim().toLowerCase();
 
       const result = await handleReserveListAction(
         adminRequest(req, {
@@ -344,20 +513,31 @@ export default async function handler(req, res) {
         ...result,
         ok: true,
         reserve: entries,
-        reserveMeta: (
-          result?.reserve &&
-          !Array.isArray(result.reserve)
-        )
-          ? {
-              count: result.reserve.count ?? entries.length,
-              group: result.reserve.group ?? "perfumes",
-              status: result.reserve.status ?? status
-            }
-          : {
-              count: entries.length,
-              group: "perfumes",
-              status
-            }
+        reserveMeta: {
+          count: result?.reserve?.count ?? entries.length,
+          group: result?.reserve?.group ?? "perfumes",
+          status: result?.reserve?.status ?? status
+        }
+      });
+    }
+
+    if (action === "publisher-control") {
+      if (req.method !== "POST") {
+        return res.status(405).json({ ok: false, error: "Use POST." });
+      }
+
+      requireAdminSession(req);
+      const body = bodyObject(req);
+
+      const control = await writePublisherControlState({
+        manualModeEnabled: body.manualModeEnabled === true,
+        source: "panel"
+      });
+
+      return res.status(200).json({
+        ok: true,
+        action,
+        control
       });
     }
 
@@ -366,6 +546,7 @@ export default async function handler(req, res) {
         return res.status(405).json({ ok: false, error: "Use POST." });
       }
 
+      requireAdminSession(req);
       return res.status(200).json(await reserveAdd(req));
     }
 
@@ -373,6 +554,8 @@ export default async function handler(req, res) {
       if (req.method !== "POST") {
         return res.status(405).json({ ok: false, error: "Use POST." });
       }
+
+      requireAdminSession(req);
 
       const body = bodyObject(req);
       const id = Number(body.id);
@@ -392,6 +575,8 @@ export default async function handler(req, res) {
       if (req.method !== "POST") {
         return res.status(405).json({ ok: false, error: "Use POST." });
       }
+
+      requireAdminSession(req);
 
       const body = bodyObject(req);
       const group = String(body.group || "").trim().toLowerCase();

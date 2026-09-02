@@ -75,6 +75,25 @@ const APP_STATE_API =
   )
     .trim();
 
+// PUBLISHER_CONTROL_SYNC_V2
+const PUBLISHER_CONTROL_API =
+  (
+    process.env.TT_PUBLISHER_CONTROL_API ||
+    new URL("/api/publisher-control", API_BASE).toString()
+  ).trim();
+
+const PUBLISHER_CONTROL_POLL_MS =
+  Math.max(
+    Number(process.env.TT_PUBLISHER_CONTROL_POLL_MS || 15000) || 15000,
+    5000
+  );
+
+const PUBLISHER_HEARTBEAT_MS =
+  Math.max(
+    Number(process.env.TT_PUBLISHER_HEARTBEAT_MS || 30000) || 30000,
+    10000
+  );
+
 const POLL_INTERVAL_MS =
   Math.max(
     Number(
@@ -1335,6 +1354,121 @@ async function apiPost(
   }
 
   return data;
+}
+
+async function publisherControlRequest({
+  method = "GET",
+  body = null
+} = {}) {
+  const response = await fetch(
+    PUBLISHER_CONTROL_API,
+    {
+      method,
+      headers: adminHeaders(),
+      body: body === null ? undefined : JSON.stringify(body)
+    }
+  );
+
+  const data = await response.json();
+
+  if (!response.ok || data?.ok === false) {
+    throw new Error(
+      data?.error ||
+      `Publisher control respondeu HTTP ${response.status}.`
+    );
+  }
+
+  return data;
+}
+
+async function persistPublisherManualControl(
+  enabled,
+  source = "whatsapp"
+) {
+  return publisherControlRequest({
+    method: "POST",
+    body: {
+      action: "control",
+      manualModeEnabled: enabled === true,
+      source
+    }
+  });
+}
+
+async function syncPublisherControlFromWeb(sock) {
+  const data = await publisherControlRequest();
+  const requested = data?.control?.manualModeEnabled;
+
+  if (typeof requested !== "boolean") return false;
+  if (requested === manualModeEnabled) return false;
+
+  manualModeEnabled = requested;
+
+  console.log(
+    requested
+      ? "✋ Modo manual ativado pelo painel web."
+      : "🤖 Modo automático reativado pelo painel web."
+  );
+
+  if (isSocketActive(sock)) {
+    try {
+      await sock.sendMessage(
+        routing.controlGroup.jid,
+        {
+          text: requested
+            ? "✋ *MODO MANUAL ATIVADO PELO PAINEL WEB*\n\nOs novos ciclos automáticos foram pausados. O grupo de controle continua ativo."
+            : "🤖 *MODO AUTOMÁTICO REATIVADO PELO PAINEL WEB*\n\nOs ciclos automáticos foram liberados."
+        }
+      );
+    } catch (error) {
+      console.log(
+        "⚠️ Modo alterado pelo painel, mas não consegui avisar o grupo:",
+        error?.message || error
+      );
+    }
+  }
+
+  if (
+    !manualModeEnabled &&
+    AUTO_BATCH_ENABLED &&
+    !automaticBatchInProgress &&
+    isSocketActive(sock)
+  ) {
+    runAutomaticBatchCycle(sock).catch(console.error);
+  }
+
+  return true;
+}
+
+async function publishPublisherHeartbeat() {
+  try {
+    await publisherControlRequest({
+      method: "POST",
+      body: {
+        action: "heartbeat",
+        runtime: {
+          whatsappConnected: whatsappConnectionOpen === true,
+          manualModeEnabled: manualModeEnabled === true,
+          automaticWindowOpen: isAutomaticSendWindowOpen(),
+          automaticBatchInProgress: automaticBatchInProgress === true,
+          autoBatchEnabled: AUTO_BATCH_ENABLED,
+          autoDiscoveryEnabled: AUTO_DISCOVERY_ENABLED,
+          affiliateConfigured: affiliateSessionConfigured(),
+          affiliateBlocked: affiliateSessionBlocked === true,
+          testMode: routing?.testMode === true,
+          sendWindow: automaticWindowLabel(),
+          timezone: AUTO_SEND_TIMEZONE,
+          currentClock: automaticCurrentClockLabel(),
+          publisherVersion: "panel-v2"
+        }
+      }
+    });
+  } catch (error) {
+    console.log(
+      "⚠️ Heartbeat do painel não pôde ser atualizado:",
+      error?.message || error
+    );
+  }
 }
 
 function normalizeStoredCursor(value) {
@@ -2667,6 +2801,18 @@ async function setManualMode(
 ) {
   const next =
     enabled === true;
+
+  try {
+    await persistPublisherManualControl(
+      next,
+      "whatsapp"
+    );
+  } catch (error) {
+    console.log(
+      "⚠️ Não consegui sincronizar o modo com o painel:",
+      error?.message || error
+    );
+  }
 
   if (
     manualModeEnabled ===
@@ -4344,6 +4490,17 @@ async function start() {
           true;
 
         try {
+          await syncPublisherControlFromWeb(sock);
+        } catch (error) {
+          console.log(
+            "⚠️ Não consegui ler o controle do painel na conexão:",
+            error?.message || error
+          );
+        }
+
+        await publishPublisherHeartbeat();
+
+        try {
           const control =
             await validateControlGroup(
               sock
@@ -4564,6 +4721,8 @@ async function start() {
           activeWhatsAppSocket =
             null;
         }
+
+        await publishPublisherHeartbeat();
 
         const statusCode =
           lastDisconnect
@@ -4967,6 +5126,27 @@ async function start() {
       );
     }
   }
+
+  scheduleInterval(
+    () => {
+      syncPublisherControlFromWeb(sock).catch(
+        (error) => console.log(
+          "⚠️ Sync painel:",
+          error?.message || error
+        )
+      );
+    },
+    PUBLISHER_CONTROL_POLL_MS
+  );
+
+  scheduleInterval(
+    () => {
+      publishPublisherHeartbeat().catch(console.error);
+    },
+    PUBLISHER_HEARTBEAT_MS
+  );
+
+  publishPublisherHeartbeat().catch(console.error);
 
   return sock;
 }

@@ -1,64 +1,225 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#090d12">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#090d12">
   <title>T&T Barateou — Painel</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="/admin/styles.css">
 </head>
 <body>
 <main class="shell">
-<section id="loginView" class="login card">
-  <div class="brand"><div class="logo">T<span>&</span>T</div><div><b>T&T Barateou</b><small>Painel administrativo</small></div></div>
-  <p class="eyebrow">ACESSO RESTRITO</p><h1>Gerencie o T&T em um só lugar.</h1>
-  <p class="muted">O grupo de controle do WhatsApp continua funcionando normalmente.</p>
-  <form id="loginForm"><label>Senha do painel</label><input id="password" type="password" required autocomplete="current-password">
-  <button class="primary">Entrar</button><p id="loginError" class="error" hidden></p></form>
-</section>
+  <section id="loginView" class="login card">
+    <div class="brand">
+      <div class="logo">T<span>&</span>T</div>
+      <div><b>T&T Barateou</b><small>Painel administrativo</small></div>
+    </div>
 
-<section id="appView" hidden>
-<header class="topbar">
-  <div class="brand"><div class="logo">T<span>&</span>T</div><div><b>T&T Barateou</b><small>Central de operações</small></div></div>
-  <div class="actions"><span id="lastUpdate" class="muted small"></span><button id="refreshButton">↻ Atualizar</button><button id="logoutButton">Sair</button></div>
-</header>
-<div id="msg" class="msg" hidden></div>
-<section class="hero"><div><p class="eyebrow">OPERAÇÃO T&T</p><h1>Visão geral</h1><p class="muted">Fila, descoberta e reserva de perfumes sem abandonar o grupo do WhatsApp.</p></div><span class="live">● Painel conectado</span></section>
+    <p class="eyebrow">ACESSO RESTRITO</p>
+    <h1>Gerencie o T&T em um só lugar.</h1>
+    <p class="muted">
+      A senha de administrador libera controles. A senha de visualização permite apenas acompanhar o painel.
+    </p>
 
-<section class="stats">
-  <article><span>Fila total</span><strong id="total">—</strong><small>registros</small></article>
-  <article><span>Prontas</span><strong id="ready">—</strong><small>para publicar</small></article>
-  <article><span>Aguardando afiliado</span><strong id="awaiting">—</strong><small>pendentes</small></article>
-  <article><span>Enviadas</span><strong id="sent">—</strong><small>histórico</small></article>
-  <article><span>Perfumes</span><strong id="perfumesCount">—</strong><small>disponíveis</small></article>
-  <article><span>Mercado Livre</span><strong id="mlStatus">—</strong><small id="mlDetail">OAuth</small></article>
-</section>
+    <form id="loginForm">
+      <label>Senha do painel</label>
+      <input id="password" type="password" required autocomplete="current-password">
+      <button class="primary">Entrar</button>
+      <p id="loginError" class="error" hidden></p>
+    </form>
+  </section>
 
-<section class="grid">
-<article class="card">
-  <div class="head"><div><p class="eyebrow">PUBLICAÇÃO</p><h2>Fila atual</h2></div>
-  <select id="queueFilter"><option value="">Todos</option><option value="ready_to_publish">Prontas</option><option value="awaiting_affiliate_link">Aguardando afiliado</option><option value="sending">Enviando</option><option value="send_error">Erro</option><option value="rejected">Rejeitadas</option><option value="sent">Enviadas</option></select></div>
-  <div id="queueList" class="list"></div>
-</article>
+  <section id="appView" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">T<span>&</span>T</div>
+        <div><b>T&T Barateou</b><small>Central de operações</small></div>
+      </div>
 
-<article class="card">
-  <p class="eyebrow">AUTOMAÇÃO</p><h2>Descobrir agora</h2><p class="muted">Mesma descoberta do grupo, acionada pelo painel.</p>
-  <button class="discover" data-group="eletronicos">📱 <span><b>Eletrônicos</b><small>Buscar novas ofertas</small></span>→</button>
-  <button class="discover" data-group="fitness">💪 <span><b>Fitness</b><small>Buscar novas ofertas</small></span>→</button>
-  <div class="disabled">🌸 <span><b>Perfumes</b><small>Somente reserva manual</small></span></div>
-</article>
-</section>
+      <div class="actions">
+        <span id="accessRole" class="roleBadge">—</span>
+        <span id="lastUpdate" class="muted small"></span>
+        <button id="refreshButton">↻ Atualizar</button>
+        <button id="logoutButton">Sair</button>
+      </div>
+    </header>
 
-<section class="card perfume">
-  <div class="head"><div><p class="eyebrow">RESERVA CIRCULAR</p><h2>Perfumes</h2><p class="muted">Cole os links selecionados; o preço é revalidado no uso.</p></div></div>
-  <div class="perfumeGrid">
-    <form id="perfumeForm"><label>Links do Mercado Livre</label><textarea id="perfumeLinks" rows="9" placeholder="Um link por linha"></textarea><small class="muted">Até 20 links por envio.</small><button class="primary">Adicionar à reserva</button></form>
-    <div><div class="tabs"><button class="tab active" data-status="available">Disponíveis</button><button class="tab" data-status="queued">Na fila</button><button class="tab" data-status="used">Usados</button><button class="tab" data-status="rejected">Rejeitados</button></div><div id="reserveList" class="list"></div></div>
-  </div>
-</section>
-<footer>Grupo de controle do WhatsApp mantido como backup · T&T Painel v1</footer>
-</section>
+    <div id="viewerNotice" class="viewerNotice" hidden>
+      👁 Modo visualização: você pode acompanhar tudo, mas não alterar a operação.
+    </div>
+
+    <div id="msg" class="msg" hidden></div>
+
+    <section class="hero">
+      <div>
+        <p class="eyebrow">OPERAÇÃO T&T</p>
+        <h1>Visão geral</h1>
+        <p class="muted">Fila, publisher, WhatsApp, descoberta e reserva de perfumes.</p>
+      </div>
+      <span id="panelConnection" class="live">● Painel conectado</span>
+    </section>
+
+    <section class="stats">
+      <article>
+        <span>Fila total</span>
+        <strong id="total">—</strong>
+        <small>registros exatos</small>
+      </article>
+      <article>
+        <span>Prontas</span>
+        <strong id="ready">—</strong>
+        <small>para publicar</small>
+      </article>
+      <article>
+        <span>Aguardando afiliado</span>
+        <strong id="awaiting">—</strong>
+        <small>pendentes</small>
+      </article>
+      <article>
+        <span>Enviadas</span>
+        <strong id="sent">—</strong>
+        <small>na janela carregada</small>
+      </article>
+      <article>
+        <span>Perfumes</span>
+        <strong id="perfumesCount">—</strong>
+        <small>disponíveis</small>
+      </article>
+      <article>
+        <span>Mercado Livre</span>
+        <strong id="mlStatus">—</strong>
+        <small id="mlDetail">OAuth</small>
+      </article>
+    </section>
+
+    <section class="card operation">
+      <div class="head">
+        <div>
+          <p class="eyebrow">CONTROLE DO BOT</p>
+          <h2>Publisher e WhatsApp</h2>
+          <p class="muted">O grupo de controle continua funcionando em paralelo.</p>
+        </div>
+        <button id="manualToggle" class="primary compact adminOnly" type="button">
+          Alterar modo
+        </button>
+      </div>
+
+      <div class="operationGrid">
+        <div class="opItem">
+          <span>Publisher</span>
+          <strong id="publisherStatus">Aguardando...</strong>
+          <small id="publisherHeartbeat">Sem heartbeat</small>
+        </div>
+        <div class="opItem">
+          <span>WhatsApp</span>
+          <strong id="whatsappStatus">—</strong>
+          <small>Baileys na VPS</small>
+        </div>
+        <div class="opItem">
+          <span>Modo</span>
+          <strong id="manualStatus">—</strong>
+          <small id="manualSource">controle compartilhado</small>
+        </div>
+        <div class="opItem">
+          <span>Janela automática</span>
+          <strong id="windowStatus">—</strong>
+          <small id="windowLabel">09:00–22:00</small>
+        </div>
+        <div class="opItem">
+          <span>Ciclo</span>
+          <strong id="cycleStatus">—</strong>
+          <small>lote automático</small>
+        </div>
+        <div class="opItem">
+          <span>Afiliados</span>
+          <strong id="affiliateStatus">—</strong>
+          <small>sessão local da VPS</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <div class="head">
+          <div>
+            <p class="eyebrow">PUBLICAÇÃO</p>
+            <h2>Fila atual</h2>
+          </div>
+          <select id="queueFilter">
+            <option value="">Todos</option>
+            <option value="ready_to_publish">Prontas</option>
+            <option value="awaiting_affiliate_link">Aguardando afiliado</option>
+            <option value="sending">Enviando</option>
+            <option value="send_error">Erro</option>
+            <option value="rejected">Rejeitadas</option>
+            <option value="sent">Enviadas</option>
+          </select>
+        </div>
+        <div id="queueList" class="list"></div>
+      </article>
+
+      <article class="card">
+        <p class="eyebrow">AUTOMAÇÃO</p>
+        <h2>Descobrir agora</h2>
+        <p class="muted">Mesma descoberta do grupo, acionada pelo painel.</p>
+
+        <button class="discover adminOnly" data-group="eletronicos">
+          📱 <span><b>Eletrônicos</b><small>Buscar novas ofertas</small></span>→
+        </button>
+
+        <button class="discover adminOnly" data-group="fitness">
+          💪 <span><b>Fitness</b><small>Buscar novas ofertas</small></span>→
+        </button>
+
+        <div class="disabled">
+          🌸 <span><b>Perfumes</b><small>Somente reserva manual</small></span>
+        </div>
+      </article>
+    </section>
+
+    <section class="card perfume">
+      <div class="head">
+        <div>
+          <p class="eyebrow">RESERVA CIRCULAR</p>
+          <h2>Perfumes</h2>
+          <p class="muted">Cole os links selecionados; o preço é revalidado no uso.</p>
+        </div>
+      </div>
+
+      <div class="perfumeGrid">
+        <form id="perfumeForm" class="adminOnlyBlock">
+          <label>Links do Mercado Livre</label>
+          <textarea id="perfumeLinks" rows="9" placeholder="Um link por linha"></textarea>
+          <small class="muted">Até 20 links por envio.</small>
+          <button class="primary">Adicionar à reserva</button>
+        </form>
+
+        <div id="viewerPerfumeHint" class="viewerPerfumeHint" hidden>
+          👁 No modo visualização, a lista de perfumes pode ser consultada, mas não alterada.
+        </div>
+
+        <div>
+          <div class="tabs">
+            <button class="tab active" data-status="available">Disponíveis</button>
+            <button class="tab" data-status="queued">Na fila</button>
+            <button class="tab" data-status="used">Usados</button>
+            <button class="tab" data-status="rejected">Rejeitados</button>
+          </div>
+          <div id="reserveList" class="list"></div>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      Grupo de controle do WhatsApp mantido como backup · T&T Painel v2
+    </footer>
+  </section>
 </main>
-<script src="./app.js"></script>
-</body></html>
+
+<script src="/admin/app.js"></script>
+</body>
+</html>

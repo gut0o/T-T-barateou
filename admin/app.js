@@ -1,30 +1,40 @@
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
-const state={queue:[],reserve:[],reserveStatus:"available"};
+const state={queue:[],reserve:[],reserveStatus:"available",role:null,publisher:null};
 const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
 const money=v=>typeof v==="number"?new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v):"—";
 const labels={awaiting_affiliate_link:"Aguardando afiliado",ready_to_publish:"Pronta",sending:"Enviando",sent:"Enviada",send_error:"Erro",rejected:"Rejeitada",available:"Disponível",claimed:"Em validação",queued:"Na fila",used:"Usado",expired:"Expirado",duplicate:"Duplicado",removed:"Removido"};
 
 async function api(action,{method="GET",body}={}){
   const r=await fetch(`/api/admin?action=${action}`,{
-    method,
-    credentials:"same-origin",
+    method,credentials:"same-origin",
     headers:{"Content-Type":"application/json","Accept":"application/json"},
     body:body?JSON.stringify(body):undefined
   });
+
   let d=null;
   try{d=await r.json()}catch{}
+
   if(r.status===401){
     showLogin();
     throw new Error(d?.error||"Sessão expirada.");
   }
+
   if(!r.ok||d?.ok===false){
     throw new Error(d?.error||`Erro HTTP ${r.status}`);
   }
+
   return d;
 }
 
-function showLogin(){$("#appView").hidden=true;$("#loginView").hidden=false}
-function showApp(){$("#loginView").hidden=true;$("#appView").hidden=false}
+function showLogin(){
+  $("#appView").hidden=true;
+  $("#loginView").hidden=false;
+}
+
+function showApp(){
+  $("#loginView").hidden=true;
+  $("#appView").hidden=false;
+}
 
 function msg(t,type="success"){
   const e=$("#msg");
@@ -32,34 +42,52 @@ function msg(t,type="success"){
   e.className=`msg ${type}`;
   e.hidden=false;
   clearTimeout(msg.t);
-  msg.t=setTimeout(()=>e.hidden=true,7000);
+  msg.t=setTimeout(()=>e.hidden=true,6500);
+}
+
+function applyRole(role){
+  state.role=role;
+  const viewer=role==="viewer";
+
+  $("#accessRole").textContent=viewer?"VISUALIZAÇÃO":"ADMIN";
+  $("#accessRole").className=`roleBadge ${viewer?"viewer":"admin"}`;
+  $("#viewerNotice").hidden=!viewer;
+  $("#viewerPerfumeHint").hidden=!viewer;
+  $("#perfumeForm").hidden=viewer;
+
+  $$(".adminOnly").forEach(el=>{
+    el.disabled=viewer;
+    el.classList.toggle("adminLocked",viewer);
+  });
 }
 
 function renderQueue(){
   const f=$("#queueFilter").value;
   const a=f?state.queue.filter(x=>x.status===f):state.queue;
-  $("#queueList").innerHTML=a.length?a.slice(0,50).map(x=>{
+
+  $("#queueList").innerHTML=a.length?a.slice(0,100).map(x=>{
     const d=x.data||x.envelope?.data||x;
-    return `<div class="row">${d.image?`<img class="thumb" src="${esc(d.image)}">`:`<div class="thumb"></div>`}<div class="main"><b>${esc(d.title||x.title||"Oferta")}</b><div class="meta">${esc(d.ttCategoryName||x.ttCategoryName||"Sem categoria")} · ${esc(d.itemId||x.itemId||"")}</div></div><div class="side">${money(d.price??x.price)}<br><span class="badge ${esc(x.status)}">${esc(labels[x.status]||x.status||"—")}</span></div></div>`;
+    return `<div class="row">${d.image?`<img class="thumb" src="${esc(d.image)}" alt="">`:`<div class="thumb"></div>`}<div class="main"><b>${esc(d.title||x.title||"Oferta")}</b><div class="meta">${esc(d.ttCategoryName||x.ttCategoryName||"Sem categoria")} · ${esc(d.itemId||x.itemId||"")}</div></div><div class="side">${money(d.price??x.price)}<br><span class="badge ${esc(x.status)}">${esc(labels[x.status]||x.status||"—")}</span></div></div>`;
   }).join(""):`<div class="empty">Nenhuma oferta neste filtro.</div>`;
 }
 
 function reserveImage(x){
-  return x.image||
-    x.metadata?.image||
-    x.metadata?.lastResolvedOffer?.image||
-    "";
+  return x.image||x.metadata?.image||x.metadata?.lastResolvedOffer?.image||"";
 }
 
 function renderReserve(){
   $("#reserveList").innerHTML=state.reserve.length?state.reserve.map(x=>{
     const image=reserveImage(x);
     const status=x.status||state.reserveStatus;
-    return `<div class="row">${image?`<img class="thumb" src="${esc(image)}">`:`<div class="thumb"></div>`}<div class="main"><b>${esc(x.title||"Perfume")}</b><div class="meta">#${esc(x.id)} · ${esc(labels[status]||status)}</div></div><div class="side">${money(x.price)}${["available","claimed","queued"].includes(status)?`<br><button data-remove="${esc(x.id)}" style="margin-top:6px;padding:4px 7px;font-size:8px;color:#ffabb1;background:transparent">Remover</button>`:""}</div></div>`;
+    const canRemove=state.role==="admin"&&["available","claimed","queued"].includes(status);
+
+    return `<div class="row">${image?`<img class="thumb" src="${esc(image)}" alt="">`:`<div class="thumb"></div>`}<div class="main"><b>${esc(x.title||"Perfume")}</b><div class="meta">#${esc(x.id)} · ${esc(labels[status]||status)}</div></div><div class="side">${money(x.price)}${canRemove?`<br><button data-remove="${esc(x.id)}" style="margin-top:6px;padding:4px 7px;font-size:8px;color:#ffabb1;background:transparent">Remover</button>`:""}</div></div>`;
   }).join(""):`<div class="empty">Nenhum perfume com status ${esc(labels[state.reserveStatus]||state.reserveStatus)}.</div>`;
 
   $$("[data-remove]").forEach(b=>b.onclick=async()=>{
+    if(state.role!=="admin")return;
     if(!confirm(`Remover reserva #${b.dataset.remove}?`))return;
+
     try{
       await api("reserve-remove",{method:"POST",body:{id:Number(b.dataset.remove)}});
       msg("Reserva removida.");
@@ -77,19 +105,80 @@ async function loadReserve(status=state.reserveStatus){
   renderReserve();
 }
 
+function setStatusText(selector,text,kind=""){
+  const el=$(selector);
+  el.textContent=text;
+  el.className=kind;
+}
+
+function relativeHeartbeat(iso){
+  if(!iso)return"Sem heartbeat";
+  const diff=Math.max(0,Date.now()-Date.parse(iso));
+  if(diff<60000)return`há ${Math.max(1,Math.round(diff/1000))}s`;
+  return`há ${Math.round(diff/60000)} min`;
+}
+
+function renderPublisher(p){
+  state.publisher=p||{};
+  const online=p?.online===true;
+
+  setStatusText("#publisherStatus",online?"ONLINE":"OFFLINE",online?"good":"bad");
+  $("#publisherHeartbeat").textContent=relativeHeartbeat(p?.heartbeatAt);
+
+  setStatusText(
+    "#whatsappStatus",
+    p?.whatsappConnected?"CONECTADO":(online?"DESCONECTADO":"SEM SINAL"),
+    p?.whatsappConnected?"good":"bad"
+  );
+
+  const manual=p?.manualModeEnabled===true;
+  setStatusText("#manualStatus",manual?"MANUAL":"AUTOMÁTICO",manual?"warn":"good");
+  $("#manualSource").textContent=p?.controlSource?`última origem: ${p.controlSource}`:"controle compartilhado";
+
+  setStatusText(
+    "#windowStatus",
+    p?.automaticWindowOpen?"LIBERADA":"PAUSADA",
+    p?.automaticWindowOpen?"good":"warn"
+  );
+  $("#windowLabel").textContent=p?.sendWindow||"09:00–22:00";
+
+  setStatusText(
+    "#cycleStatus",
+    p?.automaticBatchInProgress?"EM ANDAMENTO":"AGUARDANDO",
+    p?.automaticBatchInProgress?"warn":""
+  );
+
+  const affiliateOk=p?.affiliateConfigured&&!p?.affiliateBlocked;
+  setStatusText(
+    "#affiliateStatus",
+    affiliateOk?"OK":(p?.affiliateBlocked?"BLOQUEADO":"AGUARDANDO"),
+    affiliateOk?"good":(p?.affiliateBlocked?"bad":"warn")
+  );
+
+  const button=$("#manualToggle");
+  button.textContent=manual?"Voltar ao automático":"Ativar modo manual";
+  button.dataset.nextManual=manual?"false":"true";
+}
+
 async function refreshAll(){
   try{
-    const d=await api("dashboard"),s=d.summary||{},c=s.counts||{};
-    $("#total").textContent=s.total??0;
+    const d=await api("dashboard");
+    applyRole(d.role||state.role||"viewer");
+
+    const s=d.summary||{},c=s.counts||{};
+    $("#total").textContent=d.queueTotalExact??s.total??0;
     $("#ready").textContent=c.ready_to_publish??0;
     $("#awaiting").textContent=c.awaiting_affiliate_link??0;
     $("#sent").textContent=c.sent??0;
     $("#perfumesCount").textContent=d.perfumeAvailableCount??0;
     $("#mlStatus").textContent=d.mlStatus?.connected?"OK":"Atenção";
     $("#mlDetail").textContent=d.mlStatus?.connected?(d.mlStatus?.expired?"token precisa renovar":"OAuth conectado"):(d.mlStatus?.message||"não conectado");
+
     state.queue=d.queue?.queue?.entries||d.queue?.queue||d.queue?.entries||[];
     renderQueue();
+    renderPublisher(d.publisher||{});
     await loadReserve(state.reserveStatus);
+
     $("#lastUpdate").textContent="Atualizado "+new Intl.DateTimeFormat("pt-BR",{hour:"2-digit",minute:"2-digit"}).format(new Date());
   }catch(e){
     msg(e.message,"error");
@@ -99,9 +188,11 @@ async function refreshAll(){
 $("#loginForm").onsubmit=async e=>{
   e.preventDefault();
   $("#loginError").hidden=true;
+
   try{
-    await api("login",{method:"POST",body:{password:$("#password").value}});
+    const d=await api("login",{method:"POST",body:{password:$("#password").value}});
     $("#password").value="";
+    applyRole(d.role);
     showApp();
     await refreshAll();
   }catch(x){
@@ -112,14 +203,36 @@ $("#loginForm").onsubmit=async e=>{
 
 $("#logoutButton").onclick=async()=>{
   try{await api("logout",{method:"POST",body:{}})}
-  finally{showLogin()}
+  finally{
+    state.role=null;
+    showLogin();
+  }
 };
 
 $("#refreshButton").onclick=refreshAll;
 $("#queueFilter").onchange=renderQueue;
 
+$("#manualToggle").onclick=async()=>{
+  if(state.role!=="admin")return;
+  const next=$("#manualToggle").dataset.nextManual==="true";
+  $("#manualToggle").disabled=true;
+
+  try{
+    await api("publisher-control",{method:"POST",body:{manualModeEnabled:next}});
+    msg(next?"Modo manual solicitado ao publisher.":"Retorno ao automático solicitado.");
+    await new Promise(r=>setTimeout(r,1200));
+    await refreshAll();
+  }catch(e){
+    msg(e.message,"error");
+  }finally{
+    $("#manualToggle").disabled=false;
+  }
+};
+
 $$("[data-group]").forEach(b=>b.onclick=async()=>{
+  if(state.role!=="admin")return;
   b.disabled=true;
+
   try{
     const d=await api("discover",{method:"POST",body:{group:b.dataset.group}});
     msg(`${b.dataset.group==="eletronicos"?"Eletrônicos":"Fitness"}: ${d.totalNewQueued??0} oferta(s) nova(s).`);
@@ -133,11 +246,10 @@ $$("[data-group]").forEach(b=>b.onclick=async()=>{
 
 $("#perfumeForm").onsubmit=async e=>{
   e.preventDefault();
+  if(state.role!=="admin")return;
 
   const links=[...new Set(
-    $("#perfumeLinks").value
-      .split(/\s+/)
-      .filter(x=>/^https?:\/\//i.test(x))
+    $("#perfumeLinks").value.split(/\s+/).filter(x=>/^https?:\/\//i.test(x))
   )].slice(0,20);
 
   if(!links.length){
@@ -145,34 +257,17 @@ $("#perfumeForm").onsubmit=async e=>{
   }
 
   try{
-    const d=await api("reserve-add",{
-      method:"POST",
-      body:{group:"perfumes",affiliateLinks:links}
-    });
+    const d=await api("reserve-add",{method:"POST",body:{group:"perfumes",affiliateLinks:links}});
 
     if(d.failedCount){
-      const firstFailure=(d.results||[]).find(x=>
-        x.status==="error"||
-        x.status==="resolution_failed"||
-        x.added===false&&!x.duplicate
-      );
-
-      const detail=
-        firstFailure?.error||
-        firstFailure?.reason||
-        "um ou mais links não puderam ser adicionados";
-
-      msg(
-        `Reserva: ${d.addedCount||0} adicionado(s), ${d.duplicateCount||0} duplicado(s), ${d.failedCount||0} falha(s). Motivo: ${detail}`,
-        "error"
-      );
+      const first=(d.results||[]).find(x=>x.status==="error"||x.status==="resolution_failed"||(x.added===false&&!x.duplicate));
+      const detail=first?.error||first?.reason||"um ou mais links não puderam ser adicionados";
+      msg(`Reserva: ${d.addedCount||0} adicionado(s), ${d.duplicateCount||0} duplicado(s), ${d.failedCount||0} falha(s). Motivo: ${detail}`,"error");
     }else{
       msg(`Reserva: ${d.addedCount||0} adicionado(s), ${d.duplicateCount||0} duplicado(s).`);
     }
 
-    if(d.addedCount){
-      $("#perfumeLinks").value="";
-    }
+    if(d.addedCount)$("#perfumeLinks").value="";
 
     state.reserveStatus="available";
     $$(".tab").forEach(t=>t.classList.toggle("active",t.dataset.status==="available"));
@@ -185,6 +280,7 @@ $("#perfumeForm").onsubmit=async e=>{
 $$(".tab").forEach(t=>t.onclick=async()=>{
   $$(".tab").forEach(x=>x.classList.remove("active"));
   t.classList.add("active");
+
   try{
     await loadReserve(t.dataset.status);
   }catch(e){
@@ -194,7 +290,8 @@ $$(".tab").forEach(t=>t.onclick=async()=>{
 
 (async()=>{
   try{
-    await api("session");
+    const session=await api("session");
+    applyRole(session.role);
     showApp();
     await refreshAll();
   }catch{

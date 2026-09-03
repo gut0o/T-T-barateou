@@ -426,6 +426,9 @@ async function dashboard(req, role) {
     perfumeAvailableCount,
     perfumeCooldownCount,
     perfumeReusableCount,
+    perfumeReadyNowCount:
+      perfumeAvailableCount +
+      perfumeReusableCount,
     perfumeReuseHours:
       perfumeReuseHours(),
     publisher: publisherView(control, runtime)

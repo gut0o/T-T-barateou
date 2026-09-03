@@ -271,9 +271,9 @@ async function refreshAll(){
     $("#ready").textContent=c.ready_to_publish??0;
     $("#awaiting").textContent=c.awaiting_affiliate_link??0;
     $("#sent").textContent=c.sent??0;
-    $("#perfumesCount").textContent=d.perfumeAvailableCount??0;
+    $("#perfumesCount").textContent=d.perfumeReadyNowCount??0;
     $("#perfumesDetail").textContent=
-      `${d.perfumeCooldownCount??0} cooldown · ${d.perfumeReusableCount??0} reutilizável`;
+      `${d.perfumeAvailableCount??0} disponível · ${d.perfumeReusableCount??0} reutilizável · ${d.perfumeCooldownCount??0} cooldown`;
     $("#mlStatus").textContent=d.mlStatus?.connected?"OK":"Atenção";
     $("#mlDetail").textContent=d.mlStatus?.connected?(d.mlStatus?.expired?"token precisa renovar":"OAuth conectado"):(d.mlStatus?.message||"não conectado");
 

@@ -1459,7 +1459,7 @@ async function publishPublisherHeartbeat() {
           sendWindow: automaticWindowLabel(),
           timezone: AUTO_SEND_TIMEZONE,
           currentClock: automaticCurrentClockLabel(),
-          publisherVersion: "panel-v2"
+          publisherVersion: "panel-v2.3.2"
         }
       }
     });
@@ -1841,7 +1841,7 @@ async function getAwaitingAffiliateItem(
         "awaiting_affiliate_link",
 
       limit:
-        100
+        1000
     });
 
   const entries =
@@ -1960,7 +1960,7 @@ async function getReadyItem(
         "ready_to_publish",
 
       limit:
-        100
+        1000
     });
 
   const entries =

@@ -87,7 +87,7 @@
       <article>
         <span>Perfumes</span>
         <strong id="perfumesCount">—</strong>
-        <small>disponíveis</small>
+        <small id="perfumesDetail">disponíveis</small>
       </article>
       <article>
         <span>Mercado Livre</span>
@@ -189,7 +189,8 @@
           <h2>Adicionar produtos à fila</h2>
           <p class="muted">
             Cole links do Mercado Livre ou meli.la. O T&T identifica a categoria e prepara a oferta.
-            Eletrônicos e Fitness entram na fila normal. Perfumes continuam na reserva circular abaixo.
+            Eletrônicos e Fitness entram com prioridade no próximo turno do grupo, e a VPS gera/valida o seu meli.la antes do envio.
+            Perfumes continuam na reserva circular abaixo.
           </p>
         </div>
       </div>
@@ -204,7 +205,7 @@
 https://meli.la/..."
           ></textarea>
           <small class="muted">
-            Até 20 links por envio. Com modo automático ativo, as ofertas ficam disponíveis para os próximos ciclos.
+            Até 20 links por envio. O produto não é enviado na hora: ele vira prioridade na próxima vez que o grupo correspondente for processado.
           </small>
           <button class="primary">Adicionar à fila</button>
         </form>
@@ -255,8 +256,9 @@ https://meli.la/..."
         <div>
           <div class="tabs">
             <button class="tab active" data-status="available">Disponíveis</button>
+            <button class="tab" data-status="cooldown">Em cooldown</button>
+            <button class="tab" data-status="reusable">Prontos p/ reutilizar</button>
             <button class="tab" data-status="queued">Na fila</button>
-            <button class="tab" data-status="used">Usados</button>
             <button class="tab" data-status="rejected">Rejeitados</button>
           </div>
           <div id="reserveList" class="list"></div>
@@ -265,7 +267,7 @@ https://meli.la/..."
     </section>
 
     <footer>
-      Grupo de controle do WhatsApp mantido como backup · T&T Painel v2
+      Grupo de controle do WhatsApp mantido como backup · T&T Painel v2.3
     </footer>
   </section>
 </main>

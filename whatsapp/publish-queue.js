@@ -1763,6 +1763,72 @@ async function repairQueueDuplicates() {
 }
 
 
+
+function sortManualPriorityEntries(
+  entries
+) {
+  return (
+    Array.isArray(
+      entries
+    )
+      ? entries.slice()
+      : []
+  ).sort(
+    (a, b) => {
+      const aManual =
+        a?.priority ===
+          "manual_panel" ||
+        a?.manualPanel ===
+          true;
+
+      const bManual =
+        b?.priority ===
+          "manual_panel" ||
+        b?.manualPanel ===
+          true;
+
+      if (
+        aManual !==
+        bManual
+      ) {
+        return aManual
+          ? -1
+          : 1;
+      }
+
+      const aTime =
+        Date.parse(
+          a?.queuedAt ||
+          ""
+        );
+
+      const bTime =
+        Date.parse(
+          b?.queuedAt ||
+          ""
+        );
+
+      return (
+        (
+          Number.isFinite(
+            aTime
+          )
+            ? aTime
+            : 0
+        ) -
+        (
+          Number.isFinite(
+            bTime
+          )
+            ? bTime
+            : 0
+        )
+      );
+    }
+  );
+}
+
+
 async function getAwaitingAffiliateItem(
   group = null
 ) {
@@ -1785,7 +1851,9 @@ async function getAwaitingAffiliateItem(
     [];
 
   return (
-    entries.find(
+    sortManualPriorityEntries(
+      entries
+    ).find(
       (entry) => {
         const target =
           classifyOfferDestination(
@@ -1902,7 +1970,9 @@ async function getReadyItem(
     [];
 
   return (
-    entries.find(
+    sortManualPriorityEntries(
+      entries
+    ).find(
       (entry) => {
         const target =
           classifyOfferDestination(

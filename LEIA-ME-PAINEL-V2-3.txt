@@ -1,0 +1,58 @@
+T&T BARATEOU — PAINEL V2.3 INTEGRADO
+
+Este pacote aplica de uma vez as correções pedidas:
+
+1. PRODUTO ESCOLHIDO NO PAINEL = PRIORIDADE MANUAL
+- Eletrônicos/Fitness escolhidos no painel ficam na frente da fila automática
+  quando chegar o próximo turno daquele grupo.
+- Não quebra a ordem dos grupos.
+- Ex.: creatina = Fitness; será tentada primeiro na próxima passagem de Fitness.
+
+2. LINK AFILIADO SEGURO
+- O link colado no painel serve para IDENTIFICAR o produto.
+- Ele NÃO é publicado diretamente.
+- O publisher da VPS gera um novo meli.la usando a sessão de afiliados local.
+- Depois o backend valida que o meli.la corresponde ao produto antes de liberar.
+
+3. CORREÇÃO "NÃO EXISTE URL DE CATÁLOGO"
+- Se productId/catalogPageUrl não vierem da descoberta, o gerador monta uma
+  URL válida do anúncio usando itemId (MLB...) e tenta resolver o produto.
+- Mantém a validação final contra produto errado.
+
+4. AUTO-REPARO DE ITENS ANTIGOS
+- Se existir ready_to_publish com link normal mercadolivre.com.br em vez de
+  meli.la, ele é devolvido para awaiting_affiliate_link antes de publicar.
+- Esses itens antigos recebem prioridade manual quando forem do painel.
+
+5. PERFUMES
+Abas:
+- Disponíveis
+- Em cooldown
+- Prontos p/ reutilizar
+- Na fila
+- Rejeitados
+
+O painel também mostra quantos perfumes estão em cooldown e quantos já podem
+ser reutilizados. O padrão continua 4 horas.
+
+6. QUANDO UM PRODUTO MANUAL É ENVIADO?
+Ele NÃO sai na hora só porque foi adicionado.
+
+O ciclo continua:
+Eletrônicos → Fitness → Perfumes → pausa 15 min → repete.
+
+Produto manual:
+- fica em prioridade dentro do seu grupo;
+- quando chegar a vez daquele grupo, é tentado antes dos automáticos;
+- antes do envio, a VPS gera/valida meli.la;
+- depois de enviado, muda para sent.
+
+INSTALAÇÃO
+1. Extraia o ZIP na raiz do projeto painel-web-v1.
+2. Rode:
+   node apply-painel-v2-3-integrado.mjs
+3. Rode:
+   git status
+
+O instalador valida a sintaxe dos arquivos JS. Se qualquer etapa falhar,
+ele restaura automaticamente todos os arquivos alterados.

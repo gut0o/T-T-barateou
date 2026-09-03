@@ -2,7 +2,7 @@ const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const state={queue:[],reserve:[],reserveStatus:"available",role:null,publisher:null,productResults:[]};
 const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
 const money=v=>typeof v==="number"?new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v):"—";
-const labels={awaiting_affiliate_link:"Aguardando afiliado",ready_to_publish:"Pronta",sending:"Enviando",sent:"Enviada",send_error:"Erro",rejected:"Rejeitada",available:"Disponível",claimed:"Em validação",queued:"Na fila",used:"Usado",expired:"Expirado",duplicate:"Duplicado",removed:"Removido"};
+const labels={awaiting_affiliate_link:"Aguardando afiliado",ready_to_publish:"Pronta",sending:"Enviando",sent:"Enviada",send_error:"Erro",rejected:"Rejeitada",available:"Disponível",claimed:"Em validação",queued:"Na fila",used:"Usado",cooldown:"Em cooldown",reusable:"Pronto para reutilizar",expired:"Expirado",duplicate:"Duplicado",removed:"Removido"};
 
 async function api(action,{method="GET",body}={}){
   const r=await fetch(`/api/admin?action=${action}`,{
@@ -69,7 +69,7 @@ function renderQueue(){
 
   $("#queueList").innerHTML=a.length?a.slice(0,100).map(x=>{
     const d=x.data||x.envelope?.data||x;
-    return `<div class="row">${d.image?`<img class="thumb" src="${esc(d.image)}" alt="">`:`<div class="thumb"></div>`}<div class="main"><b>${esc(d.title||x.title||"Oferta")}</b><div class="meta">${esc(d.ttCategoryName||x.ttCategoryName||"Sem categoria")} · ${esc(d.itemId||x.itemId||"")}</div></div><div class="side">${money(d.price??x.price)}<br><span class="badge ${esc(x.status)}">${esc(labels[x.status]||x.status||"—")}</span></div></div>`;
+    return `<div class="row">${d.image?`<img class="thumb" src="${esc(d.image)}" alt="">`:`<div class="thumb"></div>`}<div class="main"><b>${esc(d.title||x.title||"Oferta")}</b><div class="meta">${esc(d.ttCategoryName||x.ttCategoryName||"Sem categoria")} · ${esc(d.itemId||x.itemId||"")}${(d.priority||x.priority)==="manual_panel"?" · ⭐ prioridade manual":""}</div></div><div class="side">${money(d.price??x.price)}<br><span class="badge ${esc(x.status)}">${esc(labels[x.status]||x.status||"—")}</span></div></div>`;
   }).join(""):`<div class="empty">Nenhuma oferta neste filtro.</div>`;
 }
 
@@ -88,7 +88,8 @@ function renderProductResults(){
   container.innerHTML=results.map(x=>{
     const status=x.status||"unknown";
     const statusLabel=
-      status==="ready_to_publish"?"ENTROU NA FILA":
+      status==="ready_to_publish"?"PRONTO PARA ENVIAR":
+      status==="awaiting_affiliate_link"?"NA FILA · PRIORIDADE":
       status==="held"?"RETIDO":
       status==="resolution_failed"?"FALHA AO ABRIR":
       status==="error"?"ERRO":
@@ -96,6 +97,7 @@ function renderProductResults(){
 
     const klass=
       status==="ready_to_publish"?"ready_to_publish":
+      status==="awaiting_affiliate_link"?"ready_to_publish":
       status==="held"?"queued":
       "send_error";
 
@@ -105,8 +107,12 @@ function renderProductResults(){
       x.heldReason||
       (
         status==="ready_to_publish"
-          ?"Produto validado e disponível para publicação."
-          :""
+          ?"Produto validado e pronto para envio."
+          :(
+              status==="awaiting_affiliate_link"
+                ?"Prioridade manual. A VPS vai gerar e validar o meli.la antes de enviar."
+                :""
+            )
       );
 
     return `<div class="row">
@@ -150,6 +156,20 @@ function restoreProductResults(){
   renderProductResults();
 }
 
+
+function formatReuseRemaining(ms){
+  if(typeof ms!=="number"||!Number.isFinite(ms))return"";
+  if(ms<=0)return"pode reutilizar agora";
+
+  const totalMinutes=Math.ceil(ms/60000);
+  const hours=Math.floor(totalMinutes/60);
+  const minutes=totalMinutes%60;
+
+  if(hours>0&&minutes>0)return`reutiliza em ${hours}h ${minutes}min`;
+  if(hours>0)return`reutiliza em ${hours}h`;
+  return`reutiliza em ${minutes}min`;
+}
+
 function reserveImage(x){
   return x.image||x.metadata?.image||x.metadata?.lastResolvedOffer?.image||"";
 }
@@ -157,10 +177,12 @@ function reserveImage(x){
 function renderReserve(){
   $("#reserveList").innerHTML=state.reserve.length?state.reserve.map(x=>{
     const image=reserveImage(x);
-    const status=x.status||state.reserveStatus;
-    const canRemove=state.role==="admin"&&["available","claimed","queued"].includes(status);
+    const rawStatus=x.status||state.reserveStatus;
+    const status=x.panelStatus||rawStatus;
+    const canRemove=state.role==="admin"&&["available","claimed","queued"].includes(rawStatus);
+    const reuseText=(status==="cooldown"||status==="reusable")?formatReuseRemaining(x.reuseRemainingMs):"";
 
-    return `<div class="row">${image?`<img class="thumb" src="${esc(image)}" alt="">`:`<div class="thumb"></div>`}<div class="main"><b>${esc(x.title||"Perfume")}</b><div class="meta">#${esc(x.id)} · ${esc(labels[status]||status)}</div></div><div class="side">${money(x.price)}${canRemove?`<br><button data-remove="${esc(x.id)}" style="margin-top:6px;padding:4px 7px;font-size:8px;color:#ffabb1;background:transparent">Remover</button>`:""}</div></div>`;
+    return `<div class="row">${image?`<img class="thumb" src="${esc(image)}" alt="">`:`<div class="thumb"></div>`}<div class="main"><b>${esc(x.title||"Perfume")}</b><div class="meta">#${esc(x.id)} · ${esc(labels[status]||status)}${reuseText?` · ${esc(reuseText)}`:""}</div></div><div class="side">${money(x.price)}${canRemove?`<br><button data-remove="${esc(x.id)}" style="margin-top:6px;padding:4px 7px;font-size:8px;color:#ffabb1;background:transparent">Remover</button>`:""}</div></div>`;
   }).join(""):`<div class="empty">Nenhum perfume com status ${esc(labels[state.reserveStatus]||state.reserveStatus)}.</div>`;
 
   $$("[data-remove]").forEach(b=>b.onclick=async()=>{
@@ -250,6 +272,8 @@ async function refreshAll(){
     $("#awaiting").textContent=c.awaiting_affiliate_link??0;
     $("#sent").textContent=c.sent??0;
     $("#perfumesCount").textContent=d.perfumeAvailableCount??0;
+    $("#perfumesDetail").textContent=
+      `${d.perfumeCooldownCount??0} cooldown · ${d.perfumeReusableCount??0} reutilizável`;
     $("#mlStatus").textContent=d.mlStatus?.connected?"OK":"Atenção";
     $("#mlDetail").textContent=d.mlStatus?.connected?(d.mlStatus?.expired?"token precisa renovar":"OAuth conectado"):(d.mlStatus?.message||"não conectado");
 
@@ -352,22 +376,22 @@ $("#productForm").onsubmit=async e=>{
     saveProductResults(d.results||[]);
 
     const detail=(d.results||[])
-      .filter(x=>x.status!=="ready_to_publish"&&x.status!=="held")
+      .filter(x=>x.status!=="ready_to_publish"&&x.status!=="awaiting_affiliate_link"&&x.status!=="held")
       .map(x=>x.error||x.reason)
       .filter(Boolean)[0];
 
     if(d.failedCount){
       msg(
-        `Produtos: ${d.readyCount||0} pronto(s), ${d.heldCount||0} retido(s), ${d.failedCount||0} falha(s).${detail?` Motivo: ${detail}`:""}`,
+        `Produtos: ${d.pendingCount||0} em prioridade, ${d.readyCount||0} pronto(s), ${d.heldCount||0} retido(s), ${d.failedCount||0} falha(s).${detail?` Motivo: ${detail}`:""}`,
         "error"
       );
     }else{
       msg(
-        `Produtos: ${d.readyCount||0} pronto(s) para publicação e ${d.heldCount||0} retido(s) pelas regras.`
+        `Produtos: ${d.pendingCount||0} em prioridade para o próximo turno, ${d.readyCount||0} já pronto(s) e ${d.heldCount||0} retido(s).`
       );
     }
 
-    if((d.readyCount||0)+(d.heldCount||0)>0){
+    if((d.pendingCount||0)+(d.readyCount||0)+(d.heldCount||0)>0){
       $("#productLinks").value="";
     }
 

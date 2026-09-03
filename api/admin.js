@@ -197,6 +197,92 @@ function reserveEntries(result) {
   return [];
 }
 
+
+function perfumeReuseHours() {
+  return Math.min(
+    Math.max(
+      Number(
+        process.env.TT_PERFUME_REUSE_HOURS ||
+        4
+      ) || 4,
+      1
+    ),
+    24
+  );
+}
+
+async function perfumeUsedEntries(req) {
+  const result =
+    await handleReserveListAction(
+      adminRequest(req, {
+        query: {
+          group:
+            "perfumes",
+          status:
+            "used",
+          limit:
+            100
+        }
+      })
+    );
+
+  const cooldownMs =
+    perfumeReuseHours() *
+    60 *
+    60 *
+    1000;
+
+  const now =
+    Date.now();
+
+  return reserveEntries(
+    result
+  ).map(
+    (entry) => {
+      const usedMs =
+        entry?.usedAt
+          ? Date.parse(
+              entry.usedAt
+            )
+          : NaN;
+
+      const reuseAvailableAt =
+        Number.isFinite(
+          usedMs
+        )
+          ? new Date(
+              usedMs +
+              cooldownMs
+            ).toISOString()
+          : null;
+
+      const reuseRemainingMs =
+        reuseAvailableAt
+          ? Math.max(
+              0,
+              Date.parse(
+                reuseAvailableAt
+              ) -
+              now
+            )
+          : null;
+
+      return {
+        ...entry,
+
+        reusable:
+          reuseRemainingMs ===
+          0,
+
+        reuseRemainingMs,
+
+        reuseAvailableAt
+      };
+    }
+  );
+}
+
+
 function publisherView(control, runtime) {
   const heartbeatAt = runtime?.heartbeatAt || null;
   const heartbeatTime = heartbeatAt ? Date.parse(heartbeatAt) : NaN;
@@ -286,6 +372,8 @@ async function dashboard(req, role) {
   ]);
 
   let perfumeAvailableCount = 0;
+  let perfumeCooldownCount = 0;
+  let perfumeReusableCount = 0;
 
   try {
     const result = await handleReserveListAction(
@@ -303,6 +391,30 @@ async function dashboard(req, role) {
     perfumeAvailableCount = 0;
   }
 
+  try {
+    const used =
+      await perfumeUsedEntries(
+        req
+      );
+
+    perfumeCooldownCount =
+      used.filter(
+        (entry) =>
+          entry.reusable !==
+          true
+      ).length;
+
+    perfumeReusableCount =
+      used.filter(
+        (entry) =>
+          entry.reusable ===
+          true
+      ).length;
+  } catch {
+    perfumeCooldownCount = 0;
+    perfumeReusableCount = 0;
+  }
+
   return {
     ok: true,
     action: "dashboard",
@@ -312,6 +424,10 @@ async function dashboard(req, role) {
     queueTotalExact,
     mlStatus,
     perfumeAvailableCount,
+    perfumeCooldownCount,
+    perfumeReusableCount,
+    perfumeReuseHours:
+      perfumeReuseHours(),
     publisher: publisherView(control, runtime)
   };
 }
@@ -418,7 +534,8 @@ async function productAdd(req) {
       await handleIngestAffiliateLinksAction(
         adminRequest(req, {
           body: {
-            affiliateLinks: batch
+            affiliateLinks: batch,
+            manualPanel: true
           }
         })
       )
@@ -435,6 +552,10 @@ async function productAdd(req) {
     ),
     heldCount: results.reduce(
       (sum, item) => sum + Number(item.heldCount || 0),
+      0
+    ),
+    pendingCount: results.reduce(
+      (sum, item) => sum + Number(item.pendingCount || 0),
       0
     ),
     failedCount: results.reduce(
@@ -547,6 +668,50 @@ export default async function handler(req, res) {
       const status = String(
         req.query?.status || "available"
       ).trim().toLowerCase();
+
+      if (
+        status === "cooldown" ||
+        status === "reusable"
+      ) {
+        const used =
+          await perfumeUsedEntries(
+            req
+          );
+
+        const entries =
+          used
+            .filter(
+              (entry) =>
+                status ===
+                  "reusable"
+                  ? entry.reusable === true
+                  : entry.reusable !== true
+            )
+            .map(
+              (entry) => ({
+                ...entry,
+                panelStatus:
+                  status
+              })
+            );
+
+        return res.status(200).json({
+          ok: true,
+          action:
+            "reserve-list",
+          reserve:
+            entries,
+          reserveMeta: {
+            count:
+              entries.length,
+            group:
+              "perfumes",
+            status,
+            reuseHours:
+              perfumeReuseHours()
+          }
+        });
+      }
 
       const result = await handleReserveListAction(
         adminRequest(req, {

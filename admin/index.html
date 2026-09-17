@@ -58,7 +58,7 @@
       <div>
         <p class="eyebrow">OPERAÇÃO T&T</p>
         <h1>Visão geral</h1>
-        <p class="muted">Fila, publisher, WhatsApp, descoberta e reserva de perfumes.</p>
+        <p class="muted">Fila, publisher, WhatsApp, descoberta e reservas circulares.</p>
       </div>
       <span id="panelConnection" class="live">● Painel conectado</span>
     </section>
@@ -88,6 +88,11 @@
         <span>Perfumes</span>
         <strong id="perfumesCount">—</strong>
         <small id="perfumesDetail">disponíveis</small>
+      </article>
+      <article>
+        <span>Livros</span>
+        <strong id="booksCount">—</strong>
+        <small id="booksDetail">disponíveis</small>
       </article>
       <article>
         <span>Mercado Livre</span>
@@ -178,6 +183,10 @@
         <div class="disabled">
           🌸 <span><b>Perfumes</b><small>Somente reserva manual</small></span>
         </div>
+
+        <div class="disabled">
+          📚 <span><b>Livros</b><small>Somente reserva manual</small></span>
+        </div>
       </article>
     </section>
 
@@ -190,7 +199,7 @@
           <p class="muted">
             Cole links do Mercado Livre ou meli.la. O T&T identifica a categoria e prepara a oferta.
             Eletrônicos e Fitness entram com prioridade no próximo turno do grupo, e a VPS gera/valida o seu meli.la antes do envio.
-            Perfumes continuam na reserva circular abaixo.
+            Perfumes e Livros continuam nas reservas circulares abaixo.
           </p>
         </div>
       </div>
@@ -254,7 +263,7 @@ https://meli.la/..."
         </div>
 
         <div>
-          <div class="tabs">
+          <div class="tabs" id="perfumeTabs">
             <button class="tab active" data-status="available">Disponíveis</button>
             <button class="tab" data-status="cooldown">Em cooldown</button>
             <button class="tab" data-status="reusable">Prontos p/ reutilizar</button>
@@ -266,8 +275,48 @@ https://meli.la/..."
       </div>
     </section>
 
+
+    <section class="card perfume">
+      <div class="head">
+        <div>
+          <p class="eyebrow">RESERVA CIRCULAR</p>
+          <h2>Livros</h2>
+          <p class="muted">
+            Cole os livros selecionados. A escolha é aleatória entre os disponíveis;
+            preço e oferta são revalidados antes de cada envio.
+          </p>
+        </div>
+      </div>
+
+      <div class="perfumeGrid">
+        <form id="bookForm" class="adminOnlyBlock">
+          <label>Links do Mercado Livre</label>
+          <textarea id="bookLinks" rows="9" placeholder="Um link por linha"></textarea>
+          <small class="muted">
+            Até 20 links por envio. Reuso circular após o mesmo intervalo padrão de 4h.
+          </small>
+          <button class="primary">Adicionar à reserva</button>
+        </form>
+
+        <div id="viewerBookHint" class="viewerPerfumeHint" hidden>
+          👁 No modo visualização, a lista de livros pode ser consultada, mas não alterada.
+        </div>
+
+        <div>
+          <div class="tabs" id="booksTabs">
+            <button class="tab active" data-status="available">Disponíveis</button>
+            <button class="tab" data-status="cooldown">Em cooldown</button>
+            <button class="tab" data-status="reusable">Prontos p/ reutilizar</button>
+            <button class="tab" data-status="queued">Na fila</button>
+            <button class="tab" data-status="rejected">Rejeitados</button>
+          </div>
+          <div id="booksReserveList" class="list"></div>
+        </div>
+      </div>
+    </section>
+
     <footer>
-      Grupo de controle do WhatsApp mantido como backup · T&T Painel v2.3
+      Grupo de controle do WhatsApp mantido como backup · T&T Painel v2.4
     </footer>
   </section>
 </main>

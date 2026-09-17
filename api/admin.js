@@ -283,6 +283,93 @@ async function perfumeUsedEntries(req) {
 }
 
 
+function bookReuseHours() {
+  return Math.min(
+    Math.max(
+      Number(
+        process.env.TT_BOOK_REUSE_HOURS ||
+        process.env.TT_PERFUME_REUSE_HOURS ||
+        4
+      ) || 4,
+      1
+    ),
+    24
+  );
+}
+
+async function bookUsedEntries(req) {
+  const result =
+    await handleReserveListAction(
+      adminRequest(req, {
+        query: {
+          group:
+            "livros",
+          status:
+            "used",
+          limit:
+            100
+        }
+      })
+    );
+
+  const cooldownMs =
+    bookReuseHours() *
+    60 *
+    60 *
+    1000;
+
+  const now =
+    Date.now();
+
+  return reserveEntries(
+    result
+  ).map(
+    (entry) => {
+      const usedMs =
+        entry?.usedAt
+          ? Date.parse(
+              entry.usedAt
+            )
+          : NaN;
+
+      const reuseAvailableAt =
+        Number.isFinite(
+          usedMs
+        )
+          ? new Date(
+              usedMs +
+              cooldownMs
+            ).toISOString()
+          : null;
+
+      const reuseRemainingMs =
+        reuseAvailableAt
+          ? Math.max(
+              0,
+              Date.parse(
+                reuseAvailableAt
+              ) -
+              now
+            )
+          : null;
+
+      return {
+        ...entry,
+
+        reusable:
+          reuseRemainingMs ===
+          0,
+
+        reuseRemainingMs,
+
+        reuseAvailableAt
+      };
+    }
+  );
+}
+
+
+
 function publisherView(control, runtime) {
   const heartbeatAt = runtime?.heartbeatAt || null;
   const heartbeatTime = heartbeatAt ? Date.parse(heartbeatAt) : NaN;
@@ -375,6 +462,10 @@ async function dashboard(req, role) {
   let perfumeCooldownCount = 0;
   let perfumeReusableCount = 0;
 
+  let bookAvailableCount = 0;
+  let bookCooldownCount = 0;
+  let bookReusableCount = 0;
+
   try {
     const result = await handleReserveListAction(
       adminRequest(req, {
@@ -415,6 +506,47 @@ async function dashboard(req, role) {
     perfumeReusableCount = 0;
   }
 
+
+  try {
+    const result = await handleReserveListAction(
+      adminRequest(req, {
+        query: {
+          group: "livros",
+          status: "available",
+          limit: 100
+        }
+      })
+    );
+
+    bookAvailableCount = reserveEntries(result).length;
+  } catch {
+    bookAvailableCount = 0;
+  }
+
+  try {
+    const used =
+      await bookUsedEntries(
+        req
+      );
+
+    bookCooldownCount =
+      used.filter(
+        (entry) =>
+          entry.reusable !==
+          true
+      ).length;
+
+    bookReusableCount =
+      used.filter(
+        (entry) =>
+          entry.reusable ===
+          true
+      ).length;
+  } catch {
+    bookCooldownCount = 0;
+    bookReusableCount = 0;
+  }
+
   return {
     ok: true,
     action: "dashboard",
@@ -431,6 +563,16 @@ async function dashboard(req, role) {
       perfumeReusableCount,
     perfumeReuseHours:
       perfumeReuseHours(),
+
+    bookAvailableCount,
+    bookCooldownCount,
+    bookReusableCount,
+    bookReadyNowCount:
+      bookAvailableCount +
+      bookReusableCount,
+    bookReuseHours:
+      bookReuseHours(),
+
     publisher: publisherView(control, runtime)
   };
 }
@@ -453,7 +595,7 @@ async function reserveAdd(req) {
   const body = bodyObject(req);
   const group = String(body.group || "").trim().toLowerCase();
 
-  if (!["eletronicos", "fitness", "perfumes"].includes(group)) {
+  if (!["eletronicos", "fitness", "perfumes", "livros"].includes(group)) {
     const error = new Error("Grupo inválido.");
     error.statusCode = 400;
     throw error;
@@ -672,14 +814,25 @@ export default async function handler(req, res) {
         req.query?.status || "available"
       ).trim().toLowerCase();
 
+      const group = String(
+        req.query?.group || "perfumes"
+      ).trim().toLowerCase();
+
+      if (!["perfumes", "livros"].includes(group)) {
+        return res.status(400).json({
+          ok: false,
+          error: "No painel circular, use perfumes ou livros."
+        });
+      }
+
       if (
         status === "cooldown" ||
         status === "reusable"
       ) {
         const used =
-          await perfumeUsedEntries(
-            req
-          );
+          group === "livros"
+            ? await bookUsedEntries(req)
+            : await perfumeUsedEntries(req);
 
         const entries =
           used
@@ -707,11 +860,12 @@ export default async function handler(req, res) {
           reserveMeta: {
             count:
               entries.length,
-            group:
-              "perfumes",
+            group,
             status,
             reuseHours:
-              perfumeReuseHours()
+              group === "livros"
+                ? bookReuseHours()
+                : perfumeReuseHours()
           }
         });
       }
@@ -719,7 +873,7 @@ export default async function handler(req, res) {
       const result = await handleReserveListAction(
         adminRequest(req, {
           query: {
-            group: "perfumes",
+            group,
             status,
             limit: 100
           }
@@ -734,7 +888,7 @@ export default async function handler(req, res) {
         reserve: entries,
         reserveMeta: {
           count: result?.reserve?.count ?? entries.length,
-          group: result?.reserve?.group ?? "perfumes",
+          group: result?.reserve?.group ?? group,
           status: result?.reserve?.status ?? status
         }
       });

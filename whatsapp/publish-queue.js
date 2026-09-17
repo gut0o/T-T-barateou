@@ -248,7 +248,8 @@ const FALLBACK_RESERVE_ENABLED =
 const AUTO_BATCH_GROUPS = [
   "eletronicos",
   "fitness",
-  "perfumes"
+  "perfumes",
+  "livros"
 ];
 
 const AUTO_BATCH_LABELS = {
@@ -274,6 +275,14 @@ const AUTO_BATCH_LABELS = {
 
     label:
       "Perfumes"
+  },
+
+  livros: {
+    emoji:
+      "📚",
+
+    label:
+      "Livros"
   }
 };
 
@@ -971,6 +980,23 @@ function discoverGroupCommand(
     return "perfumes";
   }
 
+  if (
+    value ===
+      "descobrir livros" ||
+    value ===
+      "descobrir livro" ||
+    value ===
+      "buscar livros" ||
+    value ===
+      "buscar livro" ||
+    value ===
+      "procurar livros" ||
+    value ===
+      "procurar livro"
+  ) {
+    return "livros";
+  }
+
   return null;
 }
 
@@ -988,6 +1014,10 @@ function reserveGroupFromText(value) {
 
   if (["perfumes", "perfume", "perfumaria"].includes(normalized)) {
     return "perfumes";
+  }
+
+  if (["livros", "livro", "books", "book"].includes(normalized)) {
+    return "livros";
   }
 
   return null;
@@ -1018,7 +1048,7 @@ function parseReserveCommand(text) {
     return { action: "list", group };
   }
 
-  const addMatch = normalized.match(/^reserva\s+(eletronicos?|eletronics|fitness|academia|saude fitness|perfumes?|perfumaria)\b/);
+  const addMatch = normalized.match(/^reserva\s+(eletronicos?|eletronics|fitness|academia|saude fitness|perfumes?|perfumaria|livros?|books?)\b/);
   if (addMatch) {
     return {
       action: "add",
@@ -1459,7 +1489,7 @@ async function publishPublisherHeartbeat() {
           sendWindow: automaticWindowLabel(),
           timezone: AUTO_SEND_TIMEZONE,
           currentClock: automaticCurrentClockLabel(),
-          publisherVersion: "panel-v2.3.2"
+          publisherVersion: "panel-v2.4-books-v1.1"
         }
       }
     });
@@ -2522,6 +2552,7 @@ async function sendQueueSummary(
         `📱 Eletrônicos: ${summary.reserve.groups.eletronicos?.available || 0}`,
         `💪 Fitness: ${summary.reserve.groups.fitness?.available || 0}`,
         `🌸 Perfumes: ${summary.reserve.groups.perfumes?.available || 0}`,
+        `📚 Livros: ${summary.reserve.groups.livros?.available || 0}`,
         `📦 Total disponível: ${summary.reserve.totalAvailable || 0}`
       );
     }
@@ -2723,14 +2754,30 @@ async function triggerAutoDiscovery(
     return;
   }
 
-  if (group === "perfumes") {
+  if (
+    group === "perfumes" ||
+    group === "livros"
+  ) {
+    const isBooks =
+      group === "livros";
+
+    const emoji =
+      isBooks
+        ? "📚"
+        : "🌸";
+
+    const label =
+      isBooks
+        ? "LIVROS"
+        : "PERFUMES";
+
     await sock.sendMessage(
       routing.controlGroup.jid,
       {
         text:
-          "🌸 *PERFUMES EM MODO SEMI-AUTOMÁTICO*\n\n" +
-          "A descoberta automática de perfumes está desligada.\n" +
-          "Abasteça a fila com *RESERVA PERFUMES <links>* (até 10 por mensagem).\n" +
+          `${emoji} *${label} EM MODO SEMI-AUTOMÁTICO*\n\n` +
+          `A descoberta automática de ${label.toLowerCase()} está desligada.\n` +
+          `Abasteça a fila com *RESERVA ${label} <links>* (até 10 por mensagem).\n` +
           "O bot vai consumir esses links sozinho durante os ciclos do dia."
       }
     );
@@ -2770,6 +2817,14 @@ async function triggerAutoDiscovery(
 
         label:
           "Perfumes"
+      },
+
+      livros: {
+        emoji:
+          "📚",
+
+        label:
+          "Livros"
       }
     };
 
@@ -2960,7 +3015,8 @@ async function handleReserveCommand(sock, command) {
   const groupLabels = {
     eletronicos: "📱 Eletrônicos",
     fitness: "💪 Fitness",
-    perfumes: "🌸 Perfumes"
+    perfumes: "🌸 Perfumes",
+    livros: "📚 Livros"
   };
 
   if (command.action === "help") {
@@ -2970,7 +3026,8 @@ async function handleReserveCommand(sock, command) {
         "Adicionar links:\n" +
         "RESERVA ELETRONICOS <link>\n" +
         "RESERVA FITNESS <link>\n" +
-        "RESERVA PERFUMES <link>\n\n" +
+        "RESERVA PERFUMES <link>\n" +
+        "RESERVA LIVROS <link>\n\n" +
         "Você pode mandar até 10 links na mesma mensagem.\n\n" +
         "Consultar:\n" +
         "RESERVA STATUS\n" +
@@ -2991,9 +3048,10 @@ async function handleReserveCommand(sock, command) {
         "🛟 *BANCO DE RESERVA*\n\n" +
         `📱 Eletrônicos: ${groups.eletronicos?.available || 0}\n` +
         `💪 Fitness: ${groups.fitness?.available || 0}\n` +
-        `🌸 Perfumes: ${groups.perfumes?.available || 0}\n\n` +
+        `🌸 Perfumes: ${groups.perfumes?.available || 0}\n` +
+        `📚 Livros: ${groups.livros?.available || 0}\n\n` +
         `📦 Total disponível: ${summary.totalAvailable || 0}\n` +
-        "ℹ️ Eletrônicos/Fitness: reserva é fallback. Perfumes: fila circular semi-automática; links usados voltam após 4h."
+        "ℹ️ Eletrônicos/Fitness: reserva é fallback. Perfumes/Livros: filas circulares semi-automáticas; links usados voltam após 4h."
     });
     return true;
   }
@@ -3667,10 +3725,25 @@ async function processAutomaticBatchGroup(
   const meta = AUTO_BATCH_LABELS[group];
   if (!meta) return 0;
 
-  // PERFUMES_SEMI_AUTO_RESERVE_ONLY_V2
-  // Perfumes não faz descoberta automática: usa somente os links curados
-  // adicionados pelo usuário em RESERVA PERFUMES.
-  const reserveOnly = group === "perfumes";
+  // CIRCULAR_RESERVE_ONLY_V3
+  // Perfumes e Livros não fazem descoberta automática: usam apenas
+  // os links curados nas respectivas reservas.
+  const reserveOnly =
+    group === "perfumes" ||
+    group === "livros";
+
+  if (
+    reserveOnly &&
+    !routing
+      ?.destinations
+      ?.[group]
+      ?.jid
+  ) {
+    console.log(
+      `${meta.emoji} ${meta.label}: destino ainda sem JID; reserva preservada e nenhum item será materializado.`
+    );
+    return 0;
+  }
 
   console.log(
     `${meta.emoji} Lote iniciado: ${meta.label} (meta ${AUTO_BATCH_MIN_SEND}–${AUTO_BATCH_SIZE}) | descoberta contínua`
@@ -3711,8 +3784,18 @@ async function processAutomaticBatchGroup(
     });
 
     if (!entry && reserveOnly) {
+      const reserveLabel =
+        group === "livros"
+          ? "LIVROS"
+          : "PERFUMES";
+
+      const singular =
+        group === "livros"
+          ? "livro"
+          : "perfume";
+
       console.log(
-        `${meta.emoji} 🌸 Fila semi-automática: buscando próximo link escolhido em RESERVA PERFUMES...`
+        `${meta.emoji} Fila semi-automática: buscando próximo link escolhido em RESERVA ${reserveLabel}...`
       );
 
       try {
@@ -3720,7 +3803,7 @@ async function processAutomaticBatchGroup(
 
         if (reserve?.queued) {
           console.log(
-            `${meta.emoji} 🌸 Reserva #${reserve.reserve?.id || "?"} preparada: ${reserve.title || reserve.itemId}`
+            `${meta.emoji} Reserva #${reserve.reserve?.id || "?"} preparada: ${reserve.title || reserve.itemId}`
           );
 
           // A reserva foi reaberta com dados atuais e colocada na fila.
@@ -3730,22 +3813,21 @@ async function processAutomaticBatchGroup(
 
         if (reserve?.empty) {
           console.log(
-            `${meta.emoji} 🌸 Sem perfume disponível agora (fila vazia ou links aguardando o intervalo de reuso). Nenhum perfume será descoberto automaticamente.`
+            `${meta.emoji} Sem ${singular} disponível agora (fila vazia ou links aguardando o intervalo de reuso). Nada será descoberto automaticamente.`
           );
         } else {
           console.log(
-            `${meta.emoji} 🌸 Nenhum link de perfume utilizável nesta tentativa.`
+            `${meta.emoji} Nenhum link de ${singular} utilizável nesta tentativa.`
           );
         }
       } catch (error) {
         console.error(
-          `${meta.emoji} ⚠️ Fila semi-automática de Perfumes:`,
+          `${meta.emoji} ⚠️ Fila semi-automática de ${meta.label}:`,
           error?.message || error
         );
       }
 
-      // Sem link manual utilizável: encerra apenas Perfumes neste ciclo.
-      // Eletrônicos e Fitness continuam normalmente nos próximos ciclos.
+      // Sem link manual utilizável: encerra somente este grupo circular.
       break;
     }
 
@@ -3913,6 +3995,9 @@ async function runAutomaticBatchCycle(
       0,
 
     perfumes:
+      0,
+
+    livros:
       0
   };
 
@@ -3970,7 +4055,7 @@ async function runAutomaticBatchCycle(
         );
 
     console.log(
-      `✅ Ciclo finalizado: Eletrônicos ${counts.eletronicos}/${AUTO_BATCH_SIZE} | Fitness ${counts.fitness}/${AUTO_BATCH_SIZE} | Perfumes ${counts.perfumes}/${AUTO_BATCH_SIZE}`
+      `✅ Ciclo finalizado: Eletrônicos ${counts.eletronicos}/${AUTO_BATCH_SIZE} | Fitness ${counts.fitness}/${AUTO_BATCH_SIZE} | Perfumes ${counts.perfumes}/${AUTO_BATCH_SIZE} | Livros ${counts.livros}/${AUTO_BATCH_SIZE}`
     );
     console.log(
       `⏸️ Pausa: ${Math.round(AUTO_BATCH_PAUSE_MS / 60000)} min`
@@ -3985,7 +4070,8 @@ async function runAutomaticBatchCycle(
           "🤖 *CICLO AUTOMÁTICO T&T CONCLUÍDO*\n\n" +
           `📱 Eletrônicos: ${counts.eletronicos}/${AUTO_BATCH_SIZE}\n` +
           `💪 Fitness: ${counts.fitness}/${AUTO_BATCH_SIZE}\n` +
-          `🌸 Perfumes: ${counts.perfumes}/${AUTO_BATCH_SIZE}\n\n` +
+          `🌸 Perfumes: ${counts.perfumes}/${AUTO_BATCH_SIZE}\n` +
+          `📚 Livros: ${counts.livros}/${AUTO_BATCH_SIZE}\n\n` +
           `🎯 Mínimo por grupo: ${AUTO_BATCH_MIN_SEND}\n` +
           `📤 Total enviado: ${total}\n` +
           `⏸️ Próximo ciclo em ${Math.round(AUTO_BATCH_PAUSE_MS / 60000)} minutos.`
@@ -4633,6 +4719,9 @@ async function start() {
               "🌸 Perfumes: SEMI-AUTOMÁTICO CIRCULAR | RESERVA PERFUMES | reuso padrão 4h | sem descoberta automática"
             );
             console.log(
+              `📚 Livros: SEMI-AUTOMÁTICO CIRCULAR | RESERVA LIVROS | reuso padrão 4h | sem descoberta automática | destino ${routing?.destinations?.livros?.jid ? "CONFIGURADO" : "AGUARDANDO JID"}`
+            );
+            console.log(
               `⏸️ Pausa após ciclo: ${AUTO_BATCH_PAUSE_MS} ms`
             );
             console.log(
@@ -4667,7 +4756,7 @@ async function start() {
             );
           }
           console.log(
-            `💬 Comandos em ${routing.controlGroup.name}: STATUS | MANUAL ON/OFF | DESCOBRIR ... | RESERVA STATUS | RESERVA LISTA | RESERVA ELETRONICOS/FITNESS/PERFUMES <link> | cole um link ML/meli.la`
+            `💬 Comandos em ${routing.controlGroup.name}: STATUS | MANUAL ON/OFF | DESCOBRIR ... | RESERVA STATUS | RESERVA LISTA | RESERVA ELETRONICOS/FITNESS/PERFUMES/LIVROS <link> | cole um link ML/meli.la`
           );
           console.log(
             `✋ Modo manual: ${manualModeEnabled ? "ATIVO" : "DESLIGADO"}`

@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
-const state={queue:[],reserve:[],reserveStatus:"available",role:null,publisher:null,productResults:[]};
+const state={queue:[],reserve:[],reserveStatus:"available",booksReserve:[],booksReserveStatus:"available",role:null,publisher:null,productResults:[]};
 const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
 const money=v=>typeof v==="number"?new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v):"—";
 const labels={awaiting_affiliate_link:"Aguardando afiliado",ready_to_publish:"Pronta",sending:"Enviando",sent:"Enviada",send_error:"Erro",rejected:"Rejeitada",available:"Disponível",claimed:"Em validação",queued:"Na fila",used:"Usado",cooldown:"Em cooldown",reusable:"Pronto para reutilizar",expired:"Expirado",duplicate:"Duplicado",removed:"Removido"};
@@ -54,6 +54,8 @@ function applyRole(role){
   $("#viewerNotice").hidden=!viewer;
   $("#viewerPerfumeHint").hidden=!viewer;
   $("#perfumeForm").hidden=viewer;
+  $("#viewerBookHint").hidden=!viewer;
+  $("#bookForm").hidden=viewer;
   $("#viewerProductHint").hidden=!viewer;
   $("#productForm").hidden=viewer;
 
@@ -200,10 +202,43 @@ function renderReserve(){
 }
 
 async function loadReserve(status=state.reserveStatus){
-  const d=await api(`reserve-list&status=${encodeURIComponent(status)}`);
+  const d=await api(`reserve-list&group=perfumes&status=${encodeURIComponent(status)}`);
   state.reserveStatus=status;
   state.reserve=Array.isArray(d.reserve)?d.reserve:[];
   renderReserve();
+}
+
+
+function renderBooksReserve(){
+  $("#booksReserveList").innerHTML=state.booksReserve.length?state.booksReserve.map(x=>{
+    const image=reserveImage(x);
+    const rawStatus=x.status||state.booksReserveStatus;
+    const status=x.panelStatus||rawStatus;
+    const canRemove=state.role==="admin"&&["available","claimed","queued"].includes(rawStatus);
+    const reuseText=(status==="cooldown"||status==="reusable")?formatReuseRemaining(x.reuseRemainingMs):"";
+
+    return `<div class="row">${image?`<img class="thumb" src="${esc(image)}" alt="">`:`<div class="thumb"></div>`}<div class="main"><b>${esc(x.title||"Livro")}</b><div class="meta">#${esc(x.id)} · ${esc(labels[status]||status)}${reuseText?` · ${esc(reuseText)}`:""}</div></div><div class="side">${money(x.price)}${canRemove?`<br><button data-book-remove="${esc(x.id)}" style="margin-top:6px;padding:4px 7px;font-size:8px;color:#ffabb1;background:transparent">Remover</button>`:""}</div></div>`;
+  }).join(""):`<div class="empty">Nenhum livro com status ${esc(labels[state.booksReserveStatus]||state.booksReserveStatus)}.</div>`;
+
+  $("[data-book-remove]").forEach(b=>b.onclick=async()=>{
+    if(state.role!=="admin")return;
+    if(!confirm(`Remover reserva #${b.dataset.bookRemove}?`))return;
+
+    try{
+      await api("reserve-remove",{method:"POST",body:{id:Number(b.dataset.bookRemove)}});
+      msg("Reserva de livro removida.");
+      await refreshAll();
+    }catch(e){
+      msg(e.message,"error");
+    }
+  });
+}
+
+async function loadBooksReserve(status=state.booksReserveStatus){
+  const d=await api(`reserve-list&group=livros&status=${encodeURIComponent(status)}`);
+  state.booksReserveStatus=status;
+  state.booksReserve=Array.isArray(d.reserve)?d.reserve:[];
+  renderBooksReserve();
 }
 
 function setStatusText(selector,text,kind=""){
@@ -274,6 +309,9 @@ async function refreshAll(){
     $("#perfumesCount").textContent=d.perfumeReadyNowCount??0;
     $("#perfumesDetail").textContent=
       `${d.perfumeAvailableCount??0} disponível · ${d.perfumeReusableCount??0} reutilizável · ${d.perfumeCooldownCount??0} cooldown`;
+    $("#booksCount").textContent=d.bookReadyNowCount??0;
+    $("#booksDetail").textContent=
+      `${d.bookAvailableCount??0} disponível · ${d.bookReusableCount??0} reutilizável · ${d.bookCooldownCount??0} cooldown`;
     $("#mlStatus").textContent=d.mlStatus?.connected?"OK":"Atenção";
     $("#mlDetail").textContent=d.mlStatus?.connected?(d.mlStatus?.expired?"token precisa renovar":"OAuth conectado"):(d.mlStatus?.message||"não conectado");
 
@@ -281,6 +319,7 @@ async function refreshAll(){
     renderQueue();
     renderPublisher(d.publisher||{});
     await loadReserve(state.reserveStatus);
+    await loadBooksReserve(state.booksReserveStatus);
 
     $("#lastUpdate").textContent="Atualizado "+new Intl.DateTimeFormat("pt-BR",{hour:"2-digit",minute:"2-digit"}).format(new Date());
   }catch(e){
@@ -434,19 +473,63 @@ $("#perfumeForm").onsubmit=async e=>{
     if(d.addedCount)$("#perfumeLinks").value="";
 
     state.reserveStatus="available";
-    $$(".tab").forEach(t=>t.classList.toggle("active",t.dataset.status==="available"));
+    $("#perfumeTabs .tab").forEach(t=>t.classList.toggle("active",t.dataset.status==="available"));
     await refreshAll();
   }catch(x){
     msg(x.message,"error");
   }
 };
 
-$$(".tab").forEach(t=>t.onclick=async()=>{
-  $$(".tab").forEach(x=>x.classList.remove("active"));
+$("#perfumeTabs .tab").forEach(t=>t.onclick=async()=>{
+  $("#perfumeTabs .tab").forEach(x=>x.classList.remove("active"));
   t.classList.add("active");
 
   try{
     await loadReserve(t.dataset.status);
+  }catch(e){
+    msg(e.message,"error");
+  }
+});
+
+$("#bookForm").onsubmit=async e=>{
+  e.preventDefault();
+  if(state.role!=="admin")return;
+
+  const links=[...new Set(
+    $("#bookLinks").value.split(/\s+/).filter(x=>/^https?:\/\//i.test(x))
+  )].slice(0,20);
+
+  if(!links.length){
+    return msg("Cole pelo menos um link válido de livro.","error");
+  }
+
+  try{
+    const d=await api("reserve-add",{method:"POST",body:{group:"livros",affiliateLinks:links}});
+
+    if(d.failedCount){
+      const first=(d.results||[]).find(x=>x.status==="error"||x.status==="resolution_failed"||(x.added===false&&!x.duplicate));
+      const detail=first?.error||first?.reason||"um ou mais links não puderam ser adicionados";
+      msg(`Livros: ${d.addedCount||0} adicionado(s), ${d.duplicateCount||0} duplicado(s), ${d.failedCount||0} falha(s). Motivo: ${detail}`,"error");
+    }else{
+      msg(`Livros: ${d.addedCount||0} adicionado(s), ${d.duplicateCount||0} duplicado(s).`);
+    }
+
+    if(d.addedCount)$("#bookLinks").value="";
+
+    state.booksReserveStatus="available";
+    $("#booksTabs .tab").forEach(t=>t.classList.toggle("active",t.dataset.status==="available"));
+    await refreshAll();
+  }catch(x){
+    msg(x.message,"error");
+  }
+};
+
+$("#booksTabs .tab").forEach(t=>t.onclick=async()=>{
+  $("#booksTabs .tab").forEach(x=>x.classList.remove("active"));
+  t.classList.add("active");
+
+  try{
+    await loadBooksReserve(t.dataset.status);
   }catch(e){
     msg(e.message,"error");
   }

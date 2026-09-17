@@ -16,6 +16,10 @@
     "fitness": {
       "name": "Fitness",
       "jid": "120363428242446983@g.us"
+    },
+    "livros": {
+      "name": "Livros",
+      "jid": "120363429948552078@g.us"
     }
   },
   "categories": {
@@ -57,6 +61,11 @@
       "enabled": true,
       "destination": "perfumes",
       "note": "Será ativado no próximo passo com filtro exclusivo de perfumes/fragrâncias."
+    },
+    "livros": {
+      "enabled": true,
+      "destination": "livros",
+      "note": "Reserva circular semi-automática; sem descoberta automática."
     }
   }
 }

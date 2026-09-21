@@ -1386,6 +1386,18 @@ async function apiPost(
   return data;
 }
 
+async function recycleSentHistoryItem(
+  group
+) {
+  return apiPost(
+    "recycle-sent",
+    {
+      group
+    }
+  );
+}
+
+
 async function publisherControlRequest({
   method = "GET",
   body = null
@@ -1489,7 +1501,7 @@ async function publishPublisherHeartbeat() {
           sendWindow: automaticWindowLabel(),
           timezone: AUTO_SEND_TIMEZONE,
           currentClock: automaticCurrentClockLabel(),
-          publisherVersion: "panel-v2.4-books-v1.1"
+          publisherVersion: "panel-v2.5-history-recycle"
         }
       }
     });
@@ -3752,6 +3764,7 @@ async function processAutomaticBatchGroup(
   let sentCount = 0;
   let discoveryAttempts = 0;
   let minimumExtensionLogged = false;
+  let historyRecycleAttempts = 0;
 
   while (sentCount < AUTO_BATCH_SIZE) {
     if (!isSocketActive(sock)) throw connectionClosedError();
@@ -3895,6 +3908,56 @@ async function processAutomaticBatchGroup(
           `${meta.emoji} ⚠️ Banco de Reserva ${meta.label}:`,
           error?.message || error
         );
+      }
+    }
+
+    if (
+      !entry &&
+      !reserveOnly &&
+      discoveryAttempts >= discoveryLimit
+    ) {
+      let recycledQueued = false;
+
+      while (
+        !recycledQueued &&
+        historyRecycleAttempts < 8
+      ) {
+        historyRecycleAttempts += 1;
+
+        console.log(
+          `[RECYCLE] ${meta.label}: procurando oferta enviada ha mais de 7 dias... tentativa ${historyRecycleAttempts}/8`
+        );
+
+        try {
+          const recycled =
+            await recycleSentHistoryItem(
+              group
+            );
+
+          if (
+            recycled?.queued === true
+          ) {
+            console.log(
+              `[RECYCLE] Reativado: ${recycled.title || recycled.itemId} | ultimo envio: ${recycled.previousSentAt || "desconhecido"}`
+            );
+
+            recycledQueued = true;
+            break;
+          }
+
+          console.log(
+            `[RECYCLE] Nenhum valido nesta rodada. Inspecionados: ${recycled?.scannedCount || 0}`
+          );
+        } catch (error) {
+          console.error(
+            `[RECYCLE] Erro em ${meta.label}:`,
+            error?.message || error
+          );
+        }
+      }
+
+      if (recycledQueued) {
+        continue;
       }
     }
 

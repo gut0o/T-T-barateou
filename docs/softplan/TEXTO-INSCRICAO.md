@@ -6,7 +6,7 @@
 
 ## Resumo curto (campo de portfólio)
 
-Desenvolvi um protótipo de curadoria com IA para o T&T Barateou, um sistema de automação de ofertas do Mercado Livre. O projeto consulta dados reais de produtos, utiliza o GPT-4o mini para sugerir público-alvo, relevância e mensagens de divulgação e devolve avaliações estruturadas para revisão humana. A arquitetura separa regras de validação dos resultados gerados pelo modelo. O protótipo foi testado com um anúncio real e 11 testes automatizados aprovados na primeira validação, sem envio de mensagens ou alteração da fila de produção. O objetivo é reduzir o esforço de curadoria mantendo limites claros para afirmações sobre preços e descontos.
+Desenvolvi um protótipo de curadoria com IA para o T&T Barateou, um sistema de automação de ofertas do Mercado Livre. O projeto consulta dados reais de produtos, utiliza o GPT-4o mini para sugerir público-alvo, relevância e mensagens de divulgação e devolve avaliações estruturadas para revisão humana. A arquitetura separa regras de validação dos resultados gerados pelo modelo. O protótipo foi validado com três anúncios reais de tipos de produto diferentes e 15 testes automatizados aprovados, sem envio de mensagens ou alteração da fila de produção. O objetivo é reduzir o esforço de curadoria mantendo limites claros para afirmações sobre preços e descontos.
 
 ## O problema e o motivo de usar IA (versão de entrevista)
 
@@ -14,14 +14,15 @@ O T&T já automatizava a parte operacional de descoberta e organização de ofer
 
 ## Resultados e o que falta validar
 
-- **Já demonstrado:** chamada real ao GPT-4o mini com dados de um produto do Mercado Livre, JSON com análise e mensagem sugerida; protótipo sem publicações automáticas.
+- **Já demonstrado:** três análises reais com GPT-4o mini (perfume, adesivo para PS5 e corda de pular), com respostas JSON estruturadas e mensagens sugeridas; 15/15 testes automatizados e nenhuma publicação automática realizada pela funcionalidade de IA.
 - **Ainda não demonstrado:** melhoria de conversão, economia de tempo ou superioridade sobre avaliação humana.
-- **Próximos passos:** ampliar amostras, comparar respostas com curadoria humana e testar um fluxo de aprovação antes de qualquer uso em produção.
+- **Próximos passos:** ampliar a amostra, comparar respostas com curadoria humana, melhorar o mapeamento de categorias e testar um fluxo de aprovação antes de qualquer uso em produção.
 
-## Links a preencher depois do upload
+## Links para a inscrição
 
-- Repositório: https://github.com/gut0o/T-T-barateou
-- README de IA: adicione o link do branch ou da pasta `/docs/softplan/README.md` após publicar.
-- Vídeo: [adicionar URL após gravar, caso o formulário aceite].
+- **Portfólio de IA:** https://github.com/gut0o/T-T-barateou/blob/feat/softplan-ia-portfolio/docs/softplan/README.md
+- **Código na branch da Softplan:** https://github.com/gut0o/T-T-barateou/tree/feat/softplan-ia-portfolio
+- **Evidências:** https://github.com/gut0o/T-T-barateou/tree/feat/softplan-ia-portfolio/docs/softplan/evidencias
+- **Vídeo:** adicionar após gravar e conferir o acesso por link, se o formulário aceitar.
 
 **Atenção à autoria:** ajuste o texto para refletir sua contribuição real e saiba explicar as decisões e o código apresentado. Não afirme que a IA já está em produção ou que teve aumento de vendas.

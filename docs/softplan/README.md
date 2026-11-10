@@ -1,8 +1,8 @@
 # T&T AI — Curadoria inteligente de ofertas
 
-**Projeto:** [T&T Barateou](https://github.com/gut0o/T-T-barateou)
+**Projeto:** [T&T Barateou — branch da Softplan](https://github.com/gut0o/T-T-barateou/tree/feat/softplan-ia-portfolio)
 **Finalidade:** portfólio de Inteligência Artificial — Futures / Softplan 2027
-**Status:** protótipo funcional de IA, testado com produto real. **Não integrado ao envio automático de WhatsApp.**
+**Status:** protótipo funcional de IA, testado com 3 produtos reais. **Não integrado ao envio automático de WhatsApp.**
 
 ## 1. Qual problema o projeto resolve?
 
@@ -47,20 +47,20 @@ flowchart TD
 
 ## 4. Evidências verificadas
 
-**Em 10/11/2026**, o protótipo foi executado contra um anúncio real, com retorno efetivo do `gpt-4o-mini`:
+**Em 10/11/2026**, o candidato executou o protótipo com **3 produtos reais** do Mercado Livre. Em todas as execuções houve retorno efetivo do modelo `gpt-4o-mini`, com análise qualitativa e rascunho de mensagem; o fluxo permaneceu sem publicação automática.
 
-| Campo | Resultado observado |
-|---|---|
-| Anúncio | Hugo Boss Jeans EDT Perfume Masculino 125 ml |
-| ID | `MLB5066134658` |
-| Preço consultado | R$ 316,94 |
-| Preço anterior informado na fonte | R$ 689,00 |
-| Potencial estimado pela IA | Médio |
-| Público sugerido | Homens que buscam fragrâncias de marca sofisticada |
-| Tokens desta execução | 450 |
-| Publicações automáticas efetuadas | 0 |
+| Produto real | Preço consultado | Potencial atribuído pela IA | Tokens |
+|---|---:|---|---:|
+| Hugo Boss Jeans EDT Perfume Masculino 125 ml | R$ 316,94 | Médio | 450 |
+| Adesivo retrô PlayStation PS5 (2 unidades) | R$ 15,59 | Médio | 439 |
+| Corda de pular para CrossFit | R$ 26,14 | Médio | 465 |
+| **Total** | — | **3 produtos analisados** | **1.354** |
 
-A execução do usuário passou em **11 de 11 testes locais** antes da consulta real. Esta pasta também inclui um pequeno gerador de evidência e **4 novos testes** de integridade do relatório, totalizando **15 testes locais** na versão do portfólio. Os quatro testes adicionais foram executados localmente na preparação do pacote, não no computador do candidato. Veja [resultado real detalhado](RESULTADO-REAL-2026-11-10.md).
+**Testes automatizados:** **15/15 aprovados** no PowerShell do candidato, sem falhas ou testes ignorados. **Publicações pela funcionalidade de IA:** **0**.
+
+As evidências incluem [o primeiro teste documentado (perfume)](RESULTADO-REAL-2026-11-10.md) e [o relatório JSON da execução posterior com os outros dois anúncios](evidencias/execucao-2026-11-10T20-47-04-058Z.json), além da [versão Markdown](evidencias/execucao-2026-11-10T20-47-04-058Z.md). Consulte também o [resumo das três análises](RESUMO-RESULTADOS-2026-11-10.md).
+
+A amostra é pequena, e as três classificações como **médio** não demonstram capacidade preditiva de vendas. Preços e preços anteriores foram informados pelo sistema de consulta e podem mudar; não foram confirmados por histórico independente. A classificação genérica de categoria observada em parte da amostra também merece aprimoramento futuro.
 
 **Não foram medidos:** taxa de clique, vendas, aumento de conversão, tempo economizado ou qualidade comparativa contra curadoria humana. Esses indicadores são próximos experimentos, não resultados já alcançados.
 
@@ -99,7 +99,7 @@ O último comando grava evidências em `docs/softplan/evidencias/`. Revise o con
 
 ## 7. Próximas evoluções
 
-1. Rodar análises com outros dois anúncios reais e revisar se as justificativas fazem sentido.
+1. Ampliar a amostra para dezenas de anúncios e revisar se as justificativas fazem sentido, inclusive quando o sistema atribui categoria genérica.
 2. Comparar avaliação IA x critérios humanos em um conjunto maior de ofertas.
 3. Acrescentar dados confiáveis de histórico de preços e avaliações, se disponíveis e autorizados.
 4. Introduzir aprovação humana no painel antes de qualquer possível integração ao fluxo de publicação.
@@ -113,4 +113,4 @@ Os valores refletem o momento da consulta; podem mudar. O objetivo da IA é **au
 
 ---
 
-**Documentos adicionais:** [roteiro do vídeo](ROTEIRO-VIDEO.md) · [texto para inscrição](TEXTO-INSCRICAO.md) · [demonstração visual offline](apresentacao.html)
+**Documentos adicionais:** [resumo das evidências](RESUMO-RESULTADOS-2026-11-10.md) · [roteiro do vídeo](ROTEIRO-VIDEO.md) · [texto para inscrição](TEXTO-INSCRICAO.md) · [demonstração visual offline](apresentacao.html)

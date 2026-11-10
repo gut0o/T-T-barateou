@@ -44,6 +44,15 @@ Fragrância sofisticada para homens
 ⚠️ Revisar dados e link antes de publicar. Não enviado.
 ```
 
-**Testes existentes no computador do candidato:** 11 aprovados, 0 falhas, 0 ignorados. A integração por chamada real à API da OpenAI foi executada depois desses testes.
+**Testes na primeira validação:** 11 aprovados, 0 falhas, 0 ignorados. **Validação consolidada depois da evolução do portfólio:** 15/15 testes aprovados no computador do candidato.
 
 **Interpretação correta:** há evidência de geração real de texto e classificação por um modelo de IA com dados reais do T&T. **Não há**, ainda, evidência de acerto comercial da classificação ou de publicação com IA em produção. O valor anterior informado não é, por si só, comprovação de desconto histórico ou de melhor preço de mercado.
+
+## Continuação da validação
+
+Na mesma data, mais **2 produtos reais** foram analisados com sucesso, totalizando **3 produtos**, **1.354 tokens** e **0 publicações automáticas** nas execuções demonstradas.
+
+- [Resumo dos três produtos](RESUMO-RESULTADOS-2026-11-10.md)
+- [Relatório JSON das outras duas análises](evidencias/execucao-2026-11-10T20-47-04-058Z.json)
+
+Esta página mantém o perfume como estudo de caso detalhado; os outros dois resultados permanecem documentados em arquivos próprios.

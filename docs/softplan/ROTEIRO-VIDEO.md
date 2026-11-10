@@ -14,9 +14,9 @@
 
 **Mostre:** diagrama no README e `lib/tt-ai-curator.js` rapidamente.
 
-## 00:45–01:15 — prova prática
+## 00:45–01:15 — prova prática (15 testes e uma análise ao vivo)
 
-**Fale:** “Aqui estou usando um anúncio real. O sistema busca os dados e a IA produz uma análise e um rascunho. Não envia ao WhatsApp; exige revisão humana.”
+**Fale:** “Já rodei o protótipo com três anúncios reais: perfume, adesivo de PS5 e corda de pular. Os 15 testes automatizados passaram. Agora vou mostrar uma análise com um link real. O sistema não envia ao WhatsApp; exige revisão humana.”
 
 **Mostre no PowerShell:**
 
@@ -31,11 +31,11 @@ node scripts/ai-curator-links.mjs "https://meli.la/1teZH9f"
 
 **Fale:** “Eu separei regras determinísticas da etapa de IA, validei o formato da saída e recusei respostas inválidas ou truncadas. A IA não pode afirmar que o anúncio tem o menor preço sem um histórico confiável. No protótipo, a publicação automática fica desligada.”
 
-**Mostre:** os testes ou a seção ‘Segurança e limites’ do README.
+**Mostre:** os 15 testes ou a seção ‘Segurança e limites’ do README; abra o arquivo `docs/softplan/RESUMO-RESULTADOS-2026-11-10.md` para mostrar a comparação entre as três execuções.
 
 ## 01:40–02:00 — conclusão
 
-**Fale:** “O protótipo já foi validado com um produto real. O próximo passo seria comparar as recomendações com avaliações humanas e medir se elas ajudam a escolher e comunicar melhor as ofertas, antes de colocar isso em produção.”
+**Fale:** “O protótipo já foi validado com três produtos reais, com 1.354 tokens contabilizados nas três execuções documentadas. O próximo passo seria comparar as recomendações com avaliações humanas e medir se elas ajudam a escolher e comunicar melhor as ofertas, antes de colocar isso em produção.”
 
 **Finalize:** “Código e documentação estão no repositório.”
 
@@ -45,3 +45,10 @@ node scripts/ai-curator-links.mjs "https://meli.la/1teZH9f"
 - Não mostre os valores das chaves `OPENAI_API_KEY` ou `TT_QUEUE_ADMIN_KEY`.
 - Não precisa editar um filme: a gravação de tela e voz, direta e clara, já é suficiente.
 - Hospede o vídeo com acesso por link (por exemplo, não listado), confirme que abre em janela anônima e anexe esse link à candidatura se houver campo apropriado.
+
+## Checklist antes de enviar
+
+- Confirme que a gravação mostra **15/15 testes aprovados**, sem afirmar que testes simulados equivalem a testes de integração.
+- Explique que as **3 análises reais anteriores** são evidências armazenadas; uma execução mostrada no vídeo é um novo teste, se for realizada.
+- Esconda terminal com comandos que revelem chaves, e-mails, tokens, dados pessoais ou painéis de produção.
+- Confira áudio, legibilidade e acesso ao vídeo por outra janela/navegador antes de usar o link na inscrição.

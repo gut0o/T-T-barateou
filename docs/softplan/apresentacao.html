@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="Portfólio técnico do T&T AI: curadoria inteligente de ofertas do Mercado Livre com GPT-4o mini." />
+  <title>T&T AI — Portfólio Softplan</title>
+  <style>
+    :root { --bg:#101317; --panel:#191e24; --panel2:#222932; --stroke:#39414b; --fg:#f7f9fb; --muted:#a8b1bd; --yellow:#ffc629; --green:#72e6ae; --blue:#a5caff; }
+    *{box-sizing:border-box} html{scroll-behavior:smooth} body{background:var(--bg);color:var(--fg);font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;line-height:1.55}
+    a{color:inherit} .shell{width:min(1100px,calc(100% - 40px));margin:0 auto}
+    header{border-bottom:1px solid #303841;background:rgba(16,19,23,.97);position:sticky;top:0;z-index:10}
+    nav{display:flex;align-items:center;justify-content:space-between;min-height:68px;gap:20px}
+    .brand{font-weight:900;letter-spacing:.3px;font-size:1.25rem}.brand span{color:var(--yellow)}
+    nav .links{display:flex;gap:20px;flex-wrap:wrap} nav .links a{text-decoration:none;color:var(--muted);font-size:.88rem}
+    nav .links a:hover{color:var(--yellow)}
+    .hero{padding:92px 0 64px;display:grid;grid-template-columns:1.3fr .7fr;gap:35px;align-items:center}
+    .eyebrow{color:var(--yellow);font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;font-weight:800}
+    h1{font-size:clamp(2.65rem,6.2vw,5.15rem);line-height:1.07;letter-spacing:-.055em;margin:18px 0 24px}h1 span{color:var(--yellow)}
+    .lead{font-size:1.11rem;color:#c7cfd9;max-width:670px}
+    .note{border-left:3px solid var(--yellow);color:var(--muted);padding-left:17px;margin-top:30px;font-size:.93rem}
+    .right-hero{padding:30px;background:linear-gradient(150deg,#27313a,#1b2027 60%,#342b16);border:1px solid var(--stroke);border-radius:20px}
+    .right-hero .line{height:12px;border-radius:8px;background:var(--stroke);margin:15px 0}.right-hero .line.short{width:60%}
+    .big{font-size:3.2rem;font-weight:900;color:var(--yellow);line-height:1.15;margin:8px 0}.small{font-size:.88rem;color:var(--muted)}
+    .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:10px 0 72px}
+    .stat,.card{border:1px solid var(--stroke);background:var(--panel);border-radius:16px;padding:24px}
+    .stat strong{font-size:2rem;display:block;color:var(--fg);line-height:1.2}.stat p{color:var(--muted);font-size:.88rem;margin:8px 0 0}
+    section{padding:60px 0;border-top:1px solid #2a3139}
+    .section-top{display:flex;align-items:flex-end;gap:18px;justify-content:space-between;flex-wrap:wrap;margin-bottom:26px}
+    h2{font-size:clamp(1.65rem,3.4vw,2.5rem);letter-spacing:-.03em;line-height:1.15;margin:0}
+    .sub{color:var(--muted);max-width:620px;font-size:.96rem}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+    .num{color:var(--yellow);font-size:.82rem;font-weight:900;letter-spacing:.08em}h3{font-size:1.16rem;margin:8px 0 10px}
+    .card p{color:var(--muted);margin:0;font-size:.94rem}
+    .flow{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;align-items:stretch}
+    .step{padding:20px;background:var(--panel2);border:1px solid var(--stroke);border-radius:13px;position:relative}
+    .step::after{content:"→";position:absolute;right:-13px;top:50%;transform:translateY(-50%);color:var(--yellow);font-size:1.4rem;font-weight:bold;z-index:1}
+    .step:last-child::after{display:none}.step .tag{display:block;text-transform:uppercase;letter-spacing:.1em;font-size:.7rem;color:var(--yellow);margin-bottom:6px}.step b{font-size:1.03rem}.step p{font-size:.83rem;color:var(--muted);margin:7px 0 0}
+    .result{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+    .product{border:1px solid var(--stroke);border-radius:18px;background:var(--panel);padding:27px}
+    .pill{display:inline-flex;border-radius:999px;padding:5px 11px;background:#293c2f;color:var(--green);font-size:.78rem;font-weight:700}
+    .product h3{font-size:1.6rem;margin:20px 0 12px}.price{font-size:2.65rem;letter-spacing:-.035em;font-weight:900;margin:8px 0 2px}.before{color:var(--muted);font-size:.94rem}.meta{margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:10px;border-top:1px solid var(--stroke);padding-top:20px}.meta span{color:var(--muted);font-size:.78rem}.meta b{display:block;font-size:.9rem}
+    .analysis{background:linear-gradient(160deg,#202833,#17202a);border:1px solid #455a6d;border-radius:18px;padding:27px}.analysis .bullet{margin:18px 0}.analysis .bullet strong{display:block;color:var(--blue);font-size:.85rem}.analysis .bullet p{margin:4px 0;color:#d5dee8}
+    .caution{padding:19px 21px;border-radius:12px;background:#282515;border:1px solid #564b25;color:#e9dba3;margin-top:20px;font-size:.88rem}
+    .split{display:grid;grid-template-columns:1fr 1fr;gap:28px}.list{padding-left:20px;color:var(--muted)}.list li{margin:10px 0}
+    .code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;border:1px solid var(--stroke);background:#090c10;border-radius:12px;display:block;padding:22px;white-space:pre-wrap;overflow-wrap:anywhere;color:#d6e7c2;font-size:.93rem}
+    .footer{padding:40px 0;color:var(--muted);display:flex;justify-content:space-between;gap:20px;font-size:.85rem;border-top:1px solid var(--stroke)}
+    @media (max-width:800px){.hero,.result,.split{grid-template-columns:1fr}.flow{grid-template-columns:repeat(2,1fr)}.flow .step:nth-child(2)::after{display:none}.grid{grid-template-columns:1fr}.hero{padding-top:60px}.right-hero{display:none}}
+    @media (max-width:530px){.stats{grid-template-columns:1fr}.flow{grid-template-columns:1fr}.step::after{display:none}nav .links{gap:9px}.shell{width:min(100% - 28px,1100px)}.meta{grid-template-columns:1fr}.hero{padding-bottom:25px}}
+    @media print{header{position:static}.hero{padding:32px 0}section{break-inside:avoid}.right-hero{display:none}body{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
+  </style>
+</head>
+<body>
+<header><nav class="shell"><div class="brand">T&amp;T<span> AI</span></div><div class="links"><a href="#problema">Problema</a><a href="#arquitetura">Arquitetura</a><a href="#resultado">Teste real</a><a href="#limites">Limites</a></div></nav></header>
+<main class="shell">
+  <div class="hero">
+    <div><div class="eyebrow">Portfólio técnico · Softplan Futures 2027</div><h1>Curadoria de ofertas com <span>inteligência artificial.</span></h1><p class="lead">O T&amp;T Barateou já coleta e organiza ofertas. O T&amp;T AI acrescenta uma etapa de interpretação: para quem o produto pode ser relevante, por quê e como apresentá-lo com responsabilidade.</p><div class="note">Protótipo validado em 10/11/2026 com produto real. Somente análise — nenhuma publicação automática.</div></div>
+    <div class="right-hero" aria-hidden="true"><div class="small">CAMADA DE IA</div><div class="big">GPT-4o<br>mini</div><div class="line"></div><div class="line short"></div><div class="small">Consulta de produto → JSON estruturado → rascunho para revisão</div></div>
+  </div>
+  <div class="stats"><div class="stat"><strong>11/11</strong><p>Testes aprovados na primeira execução do candidato</p></div><div class="stat"><strong>1 real</strong><p>Produto consultado e avaliado pelo modelo</p></div><div class="stat"><strong>0 envios</strong><p>WhatsApp e fila de publicação preservados</p></div></div>
+  <section id="problema"><div class="section-top"><h2>O problema vem antes da IA.</h2><p class="sub">A descoberta automática encontra produtos, mas a seleção e a comunicação exigem interpretação contextual.</p></div><div class="grid"><div class="card"><span class="num">01 · Descoberta</span><h3>Produtos variados</h3><p>O catálogo reúne ofertas diferentes, com descrições, públicos e contextos diversos.</p></div><div class="card"><span class="num">02 · Curadoria</span><h3>Relevância subjetiva</h3><p>Regras fixas ajudam a filtrar, mas nem sempre explicam o interesse provável para determinado público.</p></div><div class="card"><span class="num">03 · Comunicação</span><h3>Mensagem responsável</h3><p>O texto precisa atrair atenção sem criar promessas ou afirmar descontos não verificados.</p></div></div></section>
+  <section id="arquitetura"><div class="section-top"><h2>Arquitetura simples, responsabilidades claras.</h2><p class="sub">O modelo não substitui os validadores do T&amp;T. Ele complementa as decisões que pedem compreensão de linguagem e contexto.</p></div><div class="flow"><div class="step"><span class="tag">01 · Entrada</span><b>Link Mercado Livre</b><p>Somente domínios HTTPS autorizados.</p></div><div class="step"><span class="tag">02 · Dados</span><b>API pública do T&amp;T</b><p>Título, preço e categoria do anúncio.</p></div><div class="step"><span class="tag">03 · IA</span><b>GPT-4o mini</b><p>Potencial, público, justificativa e cuidados.</p></div><div class="step"><span class="tag">04 · Saída</span><b>Rascunho + revisão</b><p>Resposta validada, sem envio ao WhatsApp.</p></div></div></section>
+  <section id="resultado"><div class="section-top"><h2>Uma execução real. Resultados verificáveis.</h2><p class="sub">Evidência do terminal em 10/11/2026. Os números abaixo são os retornados naquela consulta e podem mudar posteriormente.</p></div><div class="result"><div class="product"><span class="pill">Consulta concluída</span><h3>Hugo Boss Jeans EDT Perfume Masculino 125ml</h3><div class="price">R$ 316,94</div><div class="before">Preço anterior informado: R$ 689,00</div><div class="meta"><div><span>Item</span><b>MLB5066134658</b></div><div><span>Origem</span><b>products_items_fallback</b></div><div><span>Modelo</span><b>gpt-4o-mini</b></div><div><span>Tokens</span><b>450</b></div></div></div><div class="analysis"><span class="eyebrow">Análise da IA</span><div class="bullet"><strong>POTENCIAL ESTIMADO</strong><p>Médio</p></div><div class="bullet"><strong>PÚBLICO-ALVO</strong><p>Homens que buscam fragrâncias de marca sofisticada.</p></div><div class="bullet"><strong>CHAMADA SUGERIDA</strong><p>“Fragrância sofisticada para homens”</p></div><div class="bullet"><strong>LIMITAÇÃO RECONHECIDA</strong><p>Sem histórico de preços ou comentários verificados para fundamentar a avaliação.</p></div></div></div><div class="caution">Preço anterior informado não é comprovação de menor preço. A classificação é qualitativa e não representa previsão comprovada de vendas.</div></section>
+  <section id="limites"><div class="section-top"><h2>O que foi demonstrado — e o que falta medir.</h2></div><div class="split"><div class="card"><span class="num">JÁ COMPROVADO</span><h3>Protótipo técnico</h3><ul class="list"><li>Chamada real ao modelo com um anúncio real</li><li>Resposta JSON estruturada com análise e texto</li><li>Validação de entrada e tratamento de respostas incorretas</li><li>Fluxo isolado da publicação em produção</li></ul></div><div class="card"><span class="num">PRÓXIMOS EXPERIMENTOS</span><h3>Valor de negócio</h3><ul class="list"><li>Analisar mais categorias com amostra maior</li><li>Comparar recomendações com avaliação humana</li><li>Medir tempo economizado e qualidade dos textos</li><li>Testar aprovação humana no painel</li></ul></div></div></section>
+  <section><div class="section-top"><h2>Reproduza no terminal.</h2><p class="sub">Rodar o comando exige uma chave OpenAI configurada no ambiente, mas nunca exibida na tela.</p></div><code class="code">node --test tests/tt-ai-curator.test.mjs tests/tt-ai-link-offers.test.mjs tests/tt-ai-portfolio-report.test.mjs
+
+node scripts/ai-curator-links.mjs "https://meli.la/SEU_LINK"</code></section>
+</main><footer class="footer shell"><div><b>T&amp;T AI</b> · Portfólio de IA aplicada ao T&amp;T Barateou</div><div>10 de novembro de 2026 · Protótipo sem publicações automáticas</div></footer>
+</body>
+</html>

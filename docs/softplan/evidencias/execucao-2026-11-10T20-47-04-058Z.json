@@ -1,0 +1,55 @@
+{
+  "projeto": "T&T Barateou — Curadoria de ofertas com IA",
+  "geradoEm": "2026-11-10T20:47:04.058Z",
+  "metodo": "Leitura de /api/offer + OpenAI; sem atualizar fila e sem WhatsApp",
+  "status": "protótipo — não implantado na publicação automática",
+  "produtosAnalisados": 2,
+  "totalTokens": 904,
+  "evidencia": [
+    {
+      "itemId": "MLB4757227441",
+      "produto": "Adesivo Logo Retrô Playstation Console Ps5 Com 02 Unidades. Vermelho Logo Retro",
+      "categoria": "Ofertas & Variedades",
+      "precoConsultadoBRL": 15.59,
+      "precoOriginalInformadoBRL": 19.02,
+      "origemPreco": "products_items_fallback",
+      "consultadoEm": "2026-11-10T20:46:53.859Z",
+      "analiseIA": {
+        "potencial": "medio",
+        "publicoAlvo": "fãs de videogames e colecionadores de memorabilia do Playstation",
+        "justificativa": "O adesivo pode atrair um público que busca personalização de consoles e itens relacionados ao Playstation, especialmente para os fãs da marca.",
+        "chamada": "Personalize seu console com estilo retro",
+        "cuidados": "Avaliação limitada à descrição do produto, sem histórico de avaliações ou análises de satisfação."
+      },
+      "rascunhoWhatsApp": "🛍️ T&T BARATEOU — RASCUNHO COM IA\nPersonalize seu console com estilo retro\n\n🛒 Adesivo Logo Retrô Playstation Console Ps5 Com 02 Unidades. Vermelho Logo Retro\n💰 Preço informado: R$ 15,59\n🏷️ Preço anterior informado: R$ 19,02\n\n⚠️ Revisar dados e link antes de publicar. Não enviado.",
+      "modelo": "gpt-4o-mini",
+      "tokens": 439,
+      "modo": "somente_analise_sem_publicacao"
+    },
+    {
+      "itemId": "MLB7451220610",
+      "produto": "Corda pular crossfit academia malhar ginástica aço",
+      "categoria": "Ofertas & Variedades",
+      "precoConsultadoBRL": 26.14,
+      "precoOriginalInformadoBRL": 64.98,
+      "origemPreco": "products_items_fallback",
+      "consultadoEm": "2026-11-10T20:47:00.824Z",
+      "analiseIA": {
+        "potencial": "medio",
+        "publicoAlvo": "praticantes de fitness e crossfit que buscam equipamentos de treino",
+        "justificativa": "A corda de pular é um equipamento popular entre quem pratica atividades físicas, especialmente no crossfit e nas academias. Isso pode atrair um público que busca melhorar sua performance no treino. No entanto, o interesse pode ser limitado por questões de marca ou preferências pessoais.",
+        "chamada": "Corda de pular para treinos dinâmicos",
+        "cuidados": "Esta avaliação não considera opiniões de clientes ou análises de satisfação, limitando a precisão."
+      },
+      "rascunhoWhatsApp": "🛍️ T&T BARATEOU — RASCUNHO COM IA\nCorda de pular para treinos dinâmicos\n\n🛒 Corda pular crossfit academia malhar ginástica aço\n💰 Preço informado: R$ 26,14\n🏷️ Preço anterior informado: R$ 64,98\n\n⚠️ Revisar dados e link antes de publicar. Não enviado.",
+      "modelo": "gpt-4o-mini",
+      "tokens": 465,
+      "modo": "somente_analise_sem_publicacao"
+    }
+  ],
+  "limites": [
+    "O modelo avalia relevância provável, não comprova que a oferta é o menor preço.",
+    "Preço e disponibilidade devem ser conferidos antes de qualquer publicação.",
+    "Nenhum desempenho comercial ou conversão de vendas foi medido nesta execução."
+  ]
+}

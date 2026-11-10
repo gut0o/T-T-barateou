@@ -1,0 +1,22 @@
+T&T BARATEOU — PAINEL V2.1 — ADICIONAR PRODUTOS
+
+NOVO
+- Campo para colar links Mercado Livre / meli.la
+- Até 20 links por envio
+- Eletrônicos/Fitness entram na fila normal
+- Categoria continua sendo determinada pelas regras do T&T
+- Perfumes continuam na Reserva Circular existente
+- Usuário VISUALIZAÇÃO não pode adicionar produtos
+
+IMPORTANTE
+O botão "Adicionar à fila" não envia instantaneamente.
+Ele coloca ofertas válidas na fila real.
+Com modo automático ativo, o publisher pode consumi-las nos ciclos seguintes.
+Com modo manual ativo, elas ficam guardadas até a automação voltar.
+
+INSTALAÇÃO
+1. Extraia este ZIP na raiz do projeto.
+2. Rode:
+   node apply-produtos-v2-1.mjs
+3. Depois:
+   git status

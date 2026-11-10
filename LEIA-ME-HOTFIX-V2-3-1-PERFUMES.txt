@@ -1,0 +1,30 @@
+T&T BARATEOU — HOTFIX PAINEL V2.3.1 — CARD PERFUMES
+
+CORREÇÃO
+Antes:
+Perfumes
+0
+30 cooldown · 20 reutilizável
+
+Isso parecia indicar que não havia perfumes, mesmo existindo 20 que já podiam
+ser reutilizados.
+
+Agora:
+Perfumes
+20
+0 disponível · 20 reutilizável · 30 cooldown
+
+O NÚMERO GRANDE passa a significar:
+quantos perfumes podem ser usados agora.
+
+Cálculo:
+prontos agora = disponíveis + reutilizáveis
+
+"Cooldown" continua aparecendo apenas como informação.
+
+INSTALAÇÃO
+1. Extraia na raiz do projeto.
+2. Rode:
+   node apply-hotfix-v2-3-1-perfumes.mjs
+3. Rode:
+   git status

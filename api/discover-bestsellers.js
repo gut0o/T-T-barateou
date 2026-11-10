@@ -39,6 +39,7 @@ import {
   handleAutoDiscoverAction,
   handleIngestAffiliateLinksAction,
   handlePublicationStatusAction,
+  handleRecycleSentAction,
   handleQueueDedupeAction,
   handleQueueListAction,
   handleQueueSummaryAction,
@@ -492,6 +493,40 @@ export default async function handler(
       )
         .trim()
         .toLowerCase();
+
+    if (action === "recycle-sent") {
+      if (
+        req.method !==
+        "POST"
+      ) {
+        return res
+          .status(405)
+          .json({
+            ok:
+              false,
+
+            error:
+              "Use POST para reciclar hist?rico.",
+
+            accessTokenExposed:
+              false,
+
+            refreshTokenExposed:
+              false
+          });
+      }
+
+      const result =
+        await handleRecycleSentAction(
+          req
+        );
+
+      return res
+        .status(200)
+        .json(
+          result
+        );
+    }
 
     if (action === "reserve-summary") {
       const result = await handleReserveSummaryAction(req);

@@ -1,0 +1,53 @@
+T&T BARATEOU — PAINEL V2
+
+O V2 mantém o grupo de controle do WhatsApp funcionando.
+
+NOVO
+- dois níveis de acesso:
+  ADMIN = controla
+  VISUALIZAÇÃO = somente leitura
+- publisher online/offline por heartbeat
+- WhatsApp conectado/desconectado
+- modo MANUAL/AUTOMÁTICO no painel
+- janela automática
+- ciclo em andamento
+- status da sessão de afiliados
+- fila total exata
+- perfumes continuam com reserva circular
+- Eletrônicos/Fitness continuam com descoberta atual
+- nenhum segredo vai para o navegador
+
+NOVA VARIÁVEL VERCEL
+TT_PANEL_VIEW_PASSWORD
+
+No Preview painel-web-v1, crie essa variável com uma senha DIFERENTE da senha admin.
+Essa é a senha que você pode compartilhar com alguém que só precisa visualizar.
+
+ARQUIVOS
+admin/index.html
+admin/styles.css
+admin/app.js
+api/admin.js
+api/publisher-control.js
+lib/tt-publisher-control-store.js
+apply-painel-v2.mjs
+
+IMPORTANTE
+O painel V2 pode ser testado no Preview antes de atualizar a VPS.
+Enquanto a VPS ainda estiver no publisher antigo, a seção "Publisher" ficará
+OFFLINE/SEM SINAL. Isso é esperado.
+
+Depois de aprovar o painel e levar a V2 para main, a VPS precisa receber o
+publisher atualizado para heartbeat e MANUAL ON/OFF pelo site funcionarem.
+
+INSTALAÇÃO LOCAL
+1. Extraia todo o ZIP na raiz do projeto painel-web-v1, substituindo os arquivos.
+2. Rode:
+   node apply-painel-v2.mjs
+3. Valide:
+   node --check api/admin.js
+   node --check api/publisher-control.js
+   node --check lib/tt-publisher-control-store.js
+   node --check admin/app.js
+   node --check whatsapp/publish-queue.js
+4. git status

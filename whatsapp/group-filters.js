@@ -2,8 +2,9 @@
 //
 // Ordem importa:
 // 1. Perfumes (regra mais específica)
-// 2. Eletrônicos
-// 3. Fitness
+// 2. Livros (reserva curada)
+// 3. Eletrônicos
+// 4. Fitness
 //
 // Qualquer produto que não passe por um destes filtros é ignorado
 // antes de gerar link afiliado e antes de criar prévia.
@@ -296,6 +297,112 @@ function perfumeDestination(
   };
 }
 
+
+function booksDestination(
+  entry,
+  routing
+) {
+  const title =
+    titleOf(
+      entry
+    );
+
+  const categoryId =
+    normalize(
+      entry?.ttCategoryId
+    );
+
+  const categoryText =
+    normalize(
+      [
+        entry?.ttCategoryName,
+        entry?.resolvedCategoryName,
+        entry?.rootCategory,
+        Array.isArray(
+          entry?.categoryPath
+        )
+          ? entry.categoryPath
+              .map(
+                (part) =>
+                  typeof part === "string"
+                    ? part
+                    : (
+                        part?.name ||
+                        ""
+                      )
+              )
+              .join(" ")
+          : ""
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+
+  const explicitBook =
+    categoryId ===
+    "livros";
+
+  const categoryLooksLikeBook =
+    includesAny(
+      categoryText,
+      [
+        "livro",
+        "livros",
+        "book",
+        "books",
+        "revista",
+        "comics",
+        "quadrinho",
+        "manga"
+      ]
+    );
+
+  const titleLooksLikeBook =
+    includesAny(
+      title,
+      [
+        "livro",
+        "manga",
+        "quadrinho",
+        "graphic novel",
+        "biblia",
+        "apostila"
+      ]
+    );
+
+  if (
+    !explicitBook &&
+    !categoryLooksLikeBook &&
+    !titleLooksLikeBook
+  ) {
+    return null;
+  }
+
+  const configured =
+    routing
+      ?.destinations
+      ?.livros;
+
+  if (!configured?.jid) {
+    return null;
+  }
+
+  return {
+    filterKey:
+      "livros",
+
+    filterLabel:
+      "Livros / Mangás / Quadrinhos",
+
+    jid:
+      configured.jid,
+
+    name:
+      configured.name ||
+      "Livros"
+  };
+}
+
 function electronicsDestination(
   entry,
   routing
@@ -448,8 +555,25 @@ export function classifyOfferDestination(
   entry,
   routing
 ) {
+  // Um item materializado pela reserva Livros deve ficar parado caso
+  // o destino Livros ainda não tenha JID. Nunca deixa cair em outro grupo.
+  if (
+    normalize(
+      entry?.ttCategoryId
+    ) === "livros"
+  ) {
+    return booksDestination(
+      entry,
+      routing
+    );
+  }
+
   return (
     perfumeDestination(
+      entry,
+      routing
+    ) ||
+    booksDestination(
       entry,
       routing
     ) ||

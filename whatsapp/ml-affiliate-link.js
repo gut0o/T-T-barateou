@@ -58,7 +58,42 @@ export function affiliateSessionStatus() {
   };
 }
 
+
+function itemListingUrl(
+  itemId
+) {
+  const safe =
+    String(
+      itemId ||
+      ""
+    )
+      .trim()
+      .toUpperCase();
+
+  if (
+    !/^MLB\d+$/.test(
+      safe
+    )
+  ) {
+    return null;
+  }
+
+  const dashed =
+    safe.replace(
+      /^MLB/,
+      "MLB-"
+    );
+
+  return (
+    "https://produto.mercadolivre.com.br/" +
+    dashed +
+    "-_JM"
+  );
+}
+
+
 function initialCatalogUrl({
+  itemId,
   productId,
   catalogPageUrl
 }) {
@@ -68,7 +103,9 @@ function initialCatalogUrl({
       (
         productId
           ? `https://www.mercadolivre.com.br/p/${productId}`
-          : ""
+          : itemListingUrl(
+              itemId
+            )
       )
     ).trim();
 
@@ -135,11 +172,13 @@ function isAllowedProductUrl(
 }
 
 async function resolveCanonicalProductUrl({
+  itemId,
   productId,
   catalogPageUrl
 }) {
   const initial =
     initialCatalogUrl({
+      itemId,
       productId,
       catalogPageUrl
     });
@@ -467,12 +506,16 @@ export async function createAffiliateLink({
 
   const canonical =
     await resolveCanonicalProductUrl({
+      itemId:
+        safeItemId,
       productId,
       catalogPageUrl
     });
 
   const initial =
     initialCatalogUrl({
+      itemId:
+        safeItemId,
       productId,
       catalogPageUrl
     });
@@ -507,6 +550,10 @@ export async function createAffiliateLink({
         : null,
 
       initial,
+
+      itemListingUrl(
+        safeItemId
+      ),
 
       productId
         ? `https://www.mercadolivre.com.br/p/${productId}`
